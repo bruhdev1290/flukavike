@@ -103,7 +103,7 @@ struct OnboardingView: View {
                     }
                     
                     if currentPage == pages.count - 1 {
-                        Button(action: {}) {
+                        Button(action: { showLogin = true }) {
                             Text("I already have an account")
                                 .font(.system(size: 17, weight: .medium))
                                 .foregroundStyle(themeManager.accentColor.color)
@@ -189,6 +189,8 @@ struct LoginView: View {
     @State private var isLoading: Bool = false
     @State private var showInstancePicker: Bool = false
     @State private var errorMessage: String? = nil
+    @State private var showRegistration: Bool = false
+    @State private var showQRCodeHelp: Bool = false
     
     let popularInstances = [
         "fluxer.app",
@@ -356,7 +358,7 @@ struct LoginView: View {
                     
                     // Alternative Options
                     VStack(spacing: 16) {
-                        Button(action: {}) {
+                        Button(action: { showQRCodeHelp = true }) {
                             Text("Sign in with QR Code")
                                 .font(.system(size: 17, weight: .medium))
                                 .foregroundStyle(themeManager.accentColor.color)
@@ -367,7 +369,7 @@ struct LoginView: View {
                                 .font(.system(size: 15))
                                 .foregroundStyle(themeManager.textSecondary(colorScheme))
                             
-                            Button(action: {}) {
+                            Button(action: { showRegistration = true }) {
                                 Text("Create one")
                                     .font(.system(size: 15, weight: .semibold))
                                     .foregroundStyle(themeManager.accentColor.color)
@@ -390,6 +392,16 @@ struct LoginView: View {
                     }
                     .foregroundStyle(themeManager.textPrimary(colorScheme))
                 }
+            }
+            .sheet(isPresented: $showRegistration) {
+                RegistrationView {
+                    dismiss()
+                }
+            }
+            .alert("QR sign-in isn't available yet", isPresented: $showQRCodeHelp) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Use your instance, username, and password for now.")
             }
         }
     }
@@ -442,6 +454,272 @@ struct LoginView: View {
                 await MainActor.run {
                     isLoading = false
                     errorMessage = "Could not connect to \(instance). Check the instance URL."
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Registration View
+struct RegistrationView: View {
+    @Environment(ThemeManager.self) private var themeManager
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dismiss) private var dismiss
+    @Environment(AppState.self) private var appState
+    
+    @State private var instance: String = ""
+    @State private var username: String = ""
+    @State private var email: String = ""
+    @State private var password: String = ""
+    @State private var isLoading: Bool = false
+    @State private var showInstancePicker: Bool = false
+    @State private var errorMessage: String? = nil
+    
+    let onAuthenticated: () -> Void
+    
+    private let popularInstances = [
+        "fluxer.app",
+        "chat.privacy.dev",
+        "community.open",
+        "talk.tech"
+    ]
+    
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 24) {
+                    VStack(spacing: 16) {
+                        ZStack {
+                            HexagonShape()
+                                .fill(themeManager.accentColor.color.opacity(0.15))
+                                .frame(width: 100, height: 100)
+                            
+                            Image(systemName: "person.badge.plus.fill")
+                                .font(.system(size: 50))
+                                .foregroundStyle(themeManager.accentColor.color)
+                        }
+                        
+                        Text("Create your Fluxer account")
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundStyle(themeManager.textPrimary(colorScheme))
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.top, 32)
+                    
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Instance")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(themeManager.textSecondary(colorScheme))
+                            .padding(.horizontal, 4)
+                        
+                        VStack(spacing: 0) {
+                            HStack {
+                                TextField("fluxer.app", text: $instance)
+                                    .font(.system(size: 17))
+                                    .foregroundStyle(themeManager.textPrimary(colorScheme))
+                                    .autocorrectionDisabled()
+                                    .textInputAutocapitalization(.never)
+                                
+                                Button(action: { showInstancePicker.toggle() }) {
+                                    Image(systemName: "chevron.down")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(themeManager.textTertiary(colorScheme))
+                                        .rotationEffect(.degrees(showInstancePicker ? 180 : 0))
+                                        .animation(.easeInOut(duration: 0.2), value: showInstancePicker)
+                                }
+                            }
+                            .padding(12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(themeManager.backgroundTertiary(colorScheme))
+                            )
+                            
+                            if showInstancePicker {
+                                VStack(spacing: 0) {
+                                    ForEach(popularInstances, id: \.self) { inst in
+                                        Button(action: {
+                                            instance = inst
+                                            showInstancePicker = false
+                                        }) {
+                                            HStack {
+                                                Text(inst)
+                                                    .font(.system(size: 16))
+                                                    .foregroundStyle(themeManager.textPrimary(colorScheme))
+                                                
+                                                Spacer()
+                                                
+                                                if instance == inst {
+                                                    Image(systemName: "checkmark")
+                                                        .font(.system(size: 14, weight: .semibold))
+                                                        .foregroundStyle(themeManager.accentColor.color)
+                                                }
+                                            }
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 10)
+                                        }
+                                        
+                                        if inst != popularInstances.last {
+                                            Divider()
+                                                .padding(.leading, 12)
+                                                .background(themeManager.separator(colorScheme))
+                                        }
+                                    }
+                                }
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .fill(themeManager.backgroundSecondary(colorScheme))
+                                )
+                                .padding(.top, 8)
+                            }
+                        }
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Username")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(themeManager.textSecondary(colorScheme))
+                            .padding(.horizontal, 4)
+                        
+                        TextField("username", text: $username)
+                            .font(.system(size: 17))
+                            .foregroundStyle(themeManager.textPrimary(colorScheme))
+                            .padding(12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(themeManager.backgroundTertiary(colorScheme))
+                            )
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Email")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(themeManager.textSecondary(colorScheme))
+                            .padding(.horizontal, 4)
+                        
+                        TextField("name@example.com", text: $email)
+                            .font(.system(size: 17))
+                            .foregroundStyle(themeManager.textPrimary(colorScheme))
+                            .padding(12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(themeManager.backgroundTertiary(colorScheme))
+                            )
+                            .keyboardType(.emailAddress)
+                            .textContentType(.emailAddress)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Password")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(themeManager.textSecondary(colorScheme))
+                            .padding(.horizontal, 4)
+                        
+                        SecureField("Create a password", text: $password)
+                            .font(.system(size: 17))
+                            .foregroundStyle(themeManager.textPrimary(colorScheme))
+                            .padding(12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(themeManager.backgroundTertiary(colorScheme))
+                            )
+                    }
+                    
+                    if let errorMessage = errorMessage {
+                        Text(errorMessage)
+                            .font(.system(size: 14))
+                            .foregroundStyle(.red)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
+                    }
+                    
+                    Button(action: register) {
+                        HStack {
+                            if isLoading {
+                                ProgressView()
+                                    .tint(.white)
+                            } else {
+                                Text("Create Account")
+                                    .font(.system(size: 17, weight: .semibold))
+                            }
+                        }
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(canRegister ? themeManager.accentColor.color : themeManager.accentColor.color.opacity(0.5))
+                        )
+                    }
+                    .disabled(!canRegister || isLoading)
+                    
+                    Spacer()
+                }
+                .padding(.horizontal, 20)
+            }
+            .background(themeManager.backgroundPrimary(colorScheme))
+            .navigationTitle("Create Account")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Back") {
+                        dismiss()
+                    }
+                    .foregroundStyle(themeManager.textPrimary(colorScheme))
+                }
+            }
+        }
+    }
+    
+    private var canRegister: Bool {
+        !instance.isEmpty && !username.isEmpty && !email.isEmpty && !password.isEmpty
+    }
+    
+    private func register() {
+        isLoading = true
+        errorMessage = nil
+        
+        Task {
+            do {
+                let response = try await AuthService.shared.register(
+                    instance: instance,
+                    username: username,
+                    email: email,
+                    password: password
+                )
+                
+                await MainActor.run {
+                    isLoading = false
+                    appState.currentUser = response.user
+                    dismiss()
+                    onAuthenticated()
+                }
+                
+                WebSocketService.shared.connect(token: response.token)
+                
+                if let deviceToken = PushNotificationService.shared.deviceToken {
+                    try? await APIService.shared.registerDeviceToken(
+                        token: deviceToken,
+                        platform: "ios"
+                    )
+                }
+            } catch let error as APIError {
+                await MainActor.run {
+                    isLoading = false
+                    switch error {
+                    case .invalidURL:
+                        errorMessage = "Could not connect to \(instance). Check the instance URL."
+                    default:
+                        errorMessage = "Could not create your account: \(error)"
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    isLoading = false
+                    errorMessage = "Could not create your account. Please try again."
                 }
             }
         }
