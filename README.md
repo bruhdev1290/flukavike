@@ -2,7 +2,6 @@
 
 An iOS client for [Fluxer](https://fluxer.app) — a modern messaging platform for communities.
 
-> ⚠️ **Note**: This is a mockup/design concept and starter project for learning Swift/SwiftUI.
 
 ---
 
