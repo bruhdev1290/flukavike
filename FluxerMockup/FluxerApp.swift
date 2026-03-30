@@ -284,6 +284,171 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         completionHandler(.newData)
     }
     
+    // MARK: - URL Handling (Deep Links)
+    
+    func application(
+        _ app: UIApplication,
+        open url: URL,
+        options: [UIApplication.OpenURLOptionsKey : Any] = [:]
+    ) -> Bool {
+        return handleDeepLink(url: url)
+    }
+    
+    // MARK: - User Activity (Siri/Handoff)
+    
+    func application(
+        _ application: UIApplication,
+        continue userActivity: NSUserActivity,
+        restorationHandler: @escaping ([UIUserActivityRestoring]?) -> Void
+    ) -> Bool {
+        // Handle Siri intents that require the app
+        if let intent = userActivity.interaction?.intent {
+            return handleIntent(intent)
+        }
+        
+        // Handle custom user activities
+        switch userActivity.activityType {
+        case "com.fluxer.startCall":
+            if let userInfo = userActivity.userInfo {
+                handleStartCallIntent(userInfo: userInfo)
+            }
+            return true
+            
+        case "com.fluxer.viewChannel":
+            if let userInfo = userActivity.userInfo {
+                handleViewChannelIntent(userInfo: userInfo)
+            }
+            return true
+            
+        case "com.fluxer.joinVoiceChannel":
+            if let userInfo = userActivity.userInfo {
+                handleJoinVoiceChannelIntent(userInfo: userInfo)
+            }
+            return true
+            
+        case "com.fluxer.siri.openApp":
+            // Just open the app (e.g., for login)
+            return true
+            
+        case NSUserActivityTypeBrowsingWeb:
+            // Handle Universal Links
+            if let url = userActivity.webpageURL {
+                return handleDeepLink(url: url)
+            }
+            return false
+            
+        default:
+            return false
+        }
+    }
+    
+    // MARK: - Intent Handlers
+    
+    private func handleIntent(_ intent: INIntent) -> Bool {
+        switch intent {
+        case is INStartCallIntent:
+            if let callIntent = intent as? INStartCallIntent,
+               let contact = callIntent.contacts?.first {
+                handleStartCallIntent(userInfo: [
+                    "recipientId": contact.customIdentifier ?? "",
+                    "recipientName": contact.displayName,
+                    "callType": callIntent.callCapability == .videoCall ? "video" : "voice"
+                ])
+            }
+            return true
+            
+        case is INSendMessageIntent:
+            // Message sent via extension, app just needs to show conversation
+            if let messageIntent = intent as? INSendMessageIntent,
+               let recipient = messageIntent.recipients?.first {
+                handleViewConversationIntent(userInfo: [
+                    "userId": recipient.customIdentifier ?? "",
+                    "username": recipient.displayName
+                ])
+            }
+            return true
+            
+        default:
+            return false
+        }
+    }
+    
+    private func handleDeepLink(url: URL) -> Bool {
+        guard url.scheme == "fluxer" else { return false }
+        
+        let pathComponents = url.pathComponents.filter { $0 != "/" }
+        
+        switch pathComponents.first {
+        case "channel":
+            if pathComponents.count >= 3 {
+                let serverId = pathComponents[1]
+                let channelId = pathComponents[2]
+                handleViewChannelIntent(userInfo: [
+                    "serverId": serverId,
+                    "channelId": channelId
+                ])
+            }
+            return true
+            
+        case "user":
+            if pathComponents.count >= 2 {
+                let userId = pathComponents[1]
+                handleViewConversationIntent(userInfo: [
+                    "userId": userId
+                ])
+            }
+            return true
+            
+        case "call":
+            if pathComponents.count >= 2 {
+                let userId = pathComponents[1]
+                handleStartCallIntent(userInfo: [
+                    "recipientId": userId,
+                    "callType": url.queryParameters?["type"] ?? "voice"
+                ])
+            }
+            return true
+            
+        default:
+            return false
+        }
+    }
+    
+    // MARK: - Navigation Handlers
+    
+    private func handleStartCallIntent(userInfo: [AnyHashable: Any]) {
+        // Post notification to be handled by the view layer
+        NotificationCenter.default.post(
+            name: .init("StartCallIntent"),
+            object: nil,
+            userInfo: userInfo as? [String: Any]
+        )
+    }
+    
+    private func handleViewChannelIntent(userInfo: [AnyHashable: Any]) {
+        NotificationCenter.default.post(
+            name: .init("ViewChannelIntent"),
+            object: nil,
+            userInfo: userInfo as? [String: Any]
+        )
+    }
+    
+    private func handleViewConversationIntent(userInfo: [AnyHashable: Any]) {
+        NotificationCenter.default.post(
+            name: .init("ViewConversationIntent"),
+            object: nil,
+            userInfo: userInfo as? [String: Any]
+        )
+    }
+    
+    private func handleJoinVoiceChannelIntent(userInfo: [AnyHashable: Any]) {
+        NotificationCenter.default.post(
+            name: .init("JoinVoiceChannelIntent"),
+            object: nil,
+            userInfo: userInfo as? [String: Any]
+        )
+    }
+    
     // MARK: - UNUserNotificationCenterDelegate
     
     func userNotificationCenter(
@@ -335,5 +500,19 @@ struct ContentView: View {
                 OnboardingView()
             }
         }
+    }
+}
+
+// MARK: - URL Extensions
+extension URL {
+    var queryParameters: [String: String]? {
+        guard let components = URLComponents(url: self, resolvingAgainstBaseURL: false),
+              let queryItems = components.queryItems else { return nil }
+        
+        var params: [String: String] = [:]
+        for item in queryItems {
+            params[item.name] = item.value
+        }
+        return params
     }
 }

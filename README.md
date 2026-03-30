@@ -25,15 +25,17 @@ This project follows these design principles:
 |---------|-------------|
 | 🎨 **Theme System** | Light, Dark, OLED Dark modes with 10 accent colors |
 | 🏠 **Home Screen** | Server pills, pinned channels, recent conversations |
-| 💬 **Chat Interface** | Message bubbles, reactions, typing indicators, voice messages |
+| 💬 **Chat Interface** | Message bubbles, reactions, typing indicators, voice messages, rich attachments |
 | 📱 **Navigation** | Customizable tab bar with floating compose button |
 | 🔔 **Notifications** | Push notifications with mentions, DMs, calls |
 | 📞 **Voice/Video Calls** | CallKit integration for calls |
 | 🖥 **Screen Sharing** | Broadcast extension for screen sharing |
-| 🔊 **Voice Channels** | Join voice channels with video support |
+| 🔊 **Voice Channels** | Join voice channels with video support, Siri voice commands |
 | 👤 **Profile** | User profiles with stats, tabs, and customization |
 | ⚙️ **Settings** | Comprehensive settings with appearance options |
 | 🚀 **Onboarding** | Welcome flow with instance selection |
+| 🎤 **Siri Integration** | Send messages, start calls, join voice channels via voice |
+| 📤 **Share Extension** | Share content from any app to Fluxer |
 | ✍️ **Composer** | Rich message composer with attachments |
 
 ### Design Highlights
@@ -58,7 +60,13 @@ FluxerMockup/
 ├── FluxerApp.swift              # App entry point with push setup
 ├── Services/
 │   ├── PushNotificationService.swift  # APNs handling
-│   └── CallManager.swift        # CallKit & WebRTC
+│   ├── APIService.swift         # Fluxer REST API client
+│   ├── WebSocketService.swift   # Real-time Gateway connection
+│   ├── AuthService.swift        # Authentication management
+│   ├── FluxerCallService.swift  # CallKit & voice calls
+│   ├── AudioRecorderService.swift # Voice message recording
+│   ├── AudioPlayerService.swift # Voice message playback
+│   └── SiriDonationService.swift # Siri intent donation
 ├── Stores/
 │   └── ThemeManager.swift       # Theme & state management
 ├── Models/
@@ -88,10 +96,19 @@ FluxerMockup/
 ├── FluxerBroadcastExtension/    # Screen sharing extension
 │   ├── SampleHandler.swift
 │   └── Info.plist
+├── FluxerIntentExtension/       # Siri intent handling
+│   ├── IntentHandler.swift
+│   └── Info.plist
+├── FluxerShareExtension/        # Share sheet extension
+│   ├── ShareViewController.swift
+│   └── Info.plist
 └── docs/
     ├── DESIGN.md                # Design system documentation
     ├── SPEC.md                  # Technical specification
-    └── API_REFERENCE.md         # Fluxer API documentation
+    ├── API_REFERENCE.md         # Fluxer API documentation
+    ├── API_INTEGRATION.md       # Integration guide
+    ├── SIRI_INTEGRATION.md      # Siri setup guide
+    └── PUSH_CALL_SETUP.md       # Push notification setup
 ```
 
 ---
@@ -187,10 +204,8 @@ enum AccentColor: String, CaseIterable, Identifiable {
 
 ### Phase 4: Advanced
 - [ ] iPad multi-column support
-- [ ] macOS app
-- [ ] Watch complications
-- [ ] Share extension
-- [ ] Siri integration
+- [x] Share extension
+- [x] Siri integration
 
 ---
 

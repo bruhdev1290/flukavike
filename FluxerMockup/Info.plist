@@ -20,6 +20,19 @@
     <key>CFBundleVersion</key>
     <string>1</string>
     
+    <!-- URL Scheme for deep linking -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.fluxer.mobile</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>fluxer</string>
+            </array>
+        </dict>
+    </array>
+    
     <!-- Required Device Capabilities -->
     <key>UIRequiredDeviceCapabilities</key>
     <array>
@@ -51,12 +64,40 @@
     <key>NSLocalNetworkUsageDescription</key>
     <string>Fluxer uses local network discovery to find the best connection for voice and video calls.</string>
     
+    <!-- Siri - Required for voice commands -->
+    <key>NSSiriUsageDescription</key>
+    <string>Fluxer uses Siri to let you send messages, start calls, and control the app hands-free.</string>
+    
     <!-- User Notifications - Required for push notifications -->
     <key>UIBackgroundModes</key>
     <array>
         <string>remote-notification</string>
         <string>voip</string>
         <string>audio</string>
+    </array>
+    
+    <!-- NSUserActivity Types for Siri/Handoff -->
+    <key>NSUserActivityTypes</key>
+    <array>
+        <string>INSendMessageIntent</string>
+        <string>INStartCallIntent</string>
+        <string>INSearchForMessagesIntent</string>
+        <string>INSetMessageAttributeIntent</string>
+        <string>com.fluxer.startCall</string>
+        <string>com.fluxer.viewMessage</string>
+        <string>com.fluxer.siri.openApp</string>
+    </array>
+    
+    <!-- App Groups for sharing data with extensions -->
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>group.com.fluxer.mobile</string>
+    </array>
+    
+    <!-- Keychain Sharing -->
+    <key>keychain-access-groups</key>
+    <array>
+        <string>$(AppIdentifierPrefix)com.fluxer.mobile</string>
     </array>
 </dict>
 </plist>

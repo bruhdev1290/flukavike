@@ -151,6 +151,22 @@ Once the app is running, try these:
 5. Tap **send** to send, or **X** to cancel
 6. Voice messages display with waveform visualization and playback controls
 
+### Share Extension
+1. Open any app with shareable content (Photos, Safari, Notes)
+2. Tap the **Share** button
+3. Select **"Share to Fluxer"** from the share sheet
+4. Choose a **server** and **channel**
+5. Add an optional message
+6. Tap **Share** to send
+
+### Siri Integration
+1. Enable Siri in **Settings → Siri & Search → Fluxer**
+2. Use voice commands:
+   - "Send a message to Alice in Fluxer saying Hello!"
+   - "Start a voice call with Bob in Fluxer"
+   - "Search for messages in Fluxer"
+3. Siri will open the app and perform the action
+
 ### Call UI (Mock)
 1. To test incoming call, the CallService is set up but requires actual API
 
