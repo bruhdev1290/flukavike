@@ -12,6 +12,13 @@ struct SettingsView: View {
     
     @State private var searchText: String = ""
     
+    private func signOut() {
+        Task {
+            await AuthService.shared.logout()
+            WebSocketService.shared.disconnect()
+        }
+    }
+    
     var body: some View {
         NavigationStack {
             List {
@@ -208,7 +215,7 @@ struct SettingsView: View {
                 
                 // Sign Out Section
                 Section {
-                    Button(action: {}) {
+                    Button(action: signOut) {
                         HStack {
                             Spacer()
                             Text("Sign Out")

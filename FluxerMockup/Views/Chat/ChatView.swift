@@ -9,12 +9,25 @@ struct ChatView: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppState.self) private var appState
+    
     let channel: Channel
     
-    @State private var messages: [Message] = Message.previewMessages
+    @State private var messages: [Message] = []
     @State private var messageText: String = ""
     @State private var isTyping: Bool = false
+    @State private var isLoading: Bool = false
+    @State private var isSending: Bool = false
+    @State private var typingUsers: [String: Date] = [:]
+    @State private var isRecordingVoice: Bool = false
+    @State private var voiceRecording: VoiceMessageRecording?
     @FocusState private var isInputFocused: Bool
+    
+    private let audioRecorder = AudioRecorderService.shared
+    private let audioPlayer = AudioPlayerService.shared
+    
+    private let apiService = APIService.shared
+    private let webSocketService = WebSocketService.shared
     
     var body: some View {
         VStack(spacing: 0) {
@@ -22,11 +35,18 @@ struct ChatView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 0) {
+                        if isLoading && messages.isEmpty {
+                            ProgressView()
+                                .padding(.vertical, 32)
+                        }
+                        
                         // Date Header
-                        Text("Today")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(themeManager.textTertiary(colorScheme))
-                            .padding(.vertical, 16)
+                        if !messages.isEmpty {
+                            Text("Today")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(themeManager.textTertiary(colorScheme))
+                                .padding(.vertical, 16)
+                        }
                         
                         ForEach(messages) { message in
                             MessageBubble(message: message)
@@ -34,8 +54,8 @@ struct ChatView: View {
                         }
                         
                         // Typing Indicator
-                        if isTyping {
-                            TypingIndicator()
+                        if !activeTypingUsers.isEmpty {
+                            TypingIndicator(users: activeTypingUsers)
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 8)
                         }
@@ -43,7 +63,12 @@ struct ChatView: View {
                     .padding(.horizontal, 8)
                 }
                 .onAppear {
+                    loadMessages()
+                    setupWebSocketHandlers()
                     scrollToBottom(proxy: proxy)
+                }
+                .onDisappear {
+                    removeWebSocketHandlers()
                 }
                 .onChange(of: messages.count) { _, _ in
                     scrollToBottom(proxy: proxy)
@@ -51,8 +76,26 @@ struct ChatView: View {
             }
             
             // Input Area
-            MessageInputView(text: $messageText, isTyping: $isTyping)
-                .focused($isInputFocused)
+            MessageInputView(
+                text: $messageText,
+                isTyping: $isTyping,
+                isSending: $isSending,
+                isRecording: $isRecordingVoice,
+                onSend: sendMessage,
+                onTyping: sendTypingIndicator,
+                onVoiceRecording: handleVoiceRecording,
+                onVoiceRecordingCancelled: cancelVoiceRecording
+            )
+            .focused($isInputFocused)
+            
+            // Voice Recording Overlay
+            if isRecordingVoice {
+                VoiceRecordingOverlay(
+                    duration: audioRecorder.recordingDuration,
+                    onCancel: cancelVoiceRecording,
+                    onSend: sendVoiceMessage
+                )
+            }
         }
         .background(themeManager.backgroundPrimary(colorScheme))
         .navigationTitle("#\(channel.name)")
@@ -74,6 +117,173 @@ struct ChatView: View {
                 }
             }
         }
+    }
+    
+    private var activeTypingUsers: [User] {
+        let now = Date()
+        let threshold: TimeInterval = 10
+        return typingUsers
+            .filter { $0.value.addingTimeInterval(threshold) > now }
+            .compactMap { _ in User.preview } // In real app, look up users by ID
+    }
+    
+    // MARK: - Messages
+    
+    private func loadMessages() {
+        Task {
+            isLoading = true
+            do {
+                let fetched = try await apiService.getMessages(channelId: channel.id, limit: 50)
+                await MainActor.run {
+                    self.messages = fetched
+                    self.isLoading = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.isLoading = false
+                    // Fallback to preview messages for mockup
+                    self.messages = Message.previewMessages
+                }
+            }
+        }
+    }
+    
+    private func sendMessage() {
+        guard !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let content = messageText
+        messageText = ""
+        isSending = true
+        
+        Task {
+            do {
+                let message = try await apiService.sendMessage(channelId: channel.id, content: content)
+                await MainActor.run {
+                    self.messages.append(message)
+                    self.isSending = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.isSending = false
+                    // Restore text on failure
+                    self.messageText = content
+                }
+            }
+        }
+    }
+    
+    private func sendTypingIndicator() {
+        webSocketService.sendTyping(channelId: channel.id)
+    }
+    
+    // MARK: - Voice Messages
+    
+    private func handleVoiceRecording(isRecording: Bool) {
+        Task {
+            if isRecording {
+                // Start recording
+                do {
+                    _ = try await audioRecorder.startRecording()
+                } catch {
+                    print("Failed to start recording: \(error)")
+                }
+            } else {
+                // Stop recording
+                if let recording = audioRecorder.stopRecording() {
+                    voiceRecording = recording
+                }
+            }
+        }
+    }
+    
+    private func cancelVoiceRecording() {
+        audioRecorder.cancelRecording()
+        voiceRecording = nil
+        isRecordingVoice = false
+    }
+    
+    private func sendVoiceMessage() {
+        guard let recording = voiceRecording, let url = recording.url else {
+            cancelVoiceRecording()
+            return
+        }
+        
+        isSending = true
+        isRecordingVoice = false
+        voiceRecording = nil
+        
+        Task {
+            do {
+                let message = try await apiService.sendVoiceMessage(
+                    channelId: channel.id,
+                    audioURL: url,
+                    duration: recording.duration,
+                    waveform: recording.waveform
+                )
+                await MainActor.run {
+                    self.messages.append(message)
+                    self.isSending = false
+                }
+                // Clean up the temporary file
+                audioRecorder.deleteRecording(at: url)
+            } catch {
+                await MainActor.run {
+                    self.isSending = false
+                }
+                print("Failed to send voice message: \(error)")
+            }
+        }
+    }
+    
+    // MARK: - WebSocket Handlers
+    
+    private func setupWebSocketHandlers() {
+        webSocketService.onMessageCreate = { [weak webSocketService] message in
+            guard message.channelId == channel.id else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                if !self.messages.contains(where: { $0.id == message.id }) {
+                    self.messages.append(message)
+                }
+                // Remove typing indicator for this user
+                self.typingUsers.removeValue(forKey: message.author.id)
+            }
+        }
+        
+        webSocketService.onMessageUpdate = { [weak webSocketService] message in
+            guard message.channelId == channel.id else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                if let index = self.messages.firstIndex(where: { $0.id == message.id }) {
+                    self.messages[index] = message
+                }
+            }
+        }
+        
+        webSocketService.onMessageDelete = { [weak webSocketService] messageId in
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.messages.removeAll { $0.id == messageId }
+            }
+        }
+        
+        webSocketService.onTypingStart = { [weak webSocketService] event in
+            guard event.channelId == channel.id else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.typingUsers[event.userId] = Date()
+                // Auto-clear after 10 seconds
+                DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+                    self?.typingUsers.removeValue(forKey: event.userId)
+                }
+            }
+        }
+    }
+    
+    private func removeWebSocketHandlers() {
+        webSocketService.onMessageCreate = nil
+        webSocketService.onMessageUpdate = nil
+        webSocketService.onMessageDelete = nil
+        webSocketService.onTypingStart = nil
     }
     
     private func scrollToBottom(proxy: ScrollViewProxy) {
@@ -118,11 +328,18 @@ struct MessageBubble: View {
                     }
                 }
                 
-                // Content
-                Text(message.content)
-                    .font(.system(size: 16))
-                    .foregroundStyle(themeManager.textPrimary(colorScheme))
-                    .lineSpacing(2)
+                // Content (or Voice Message)
+                if let voiceAttachment = message.attachments.first(where: { $0.isVoiceMessage }) {
+                    VoiceMessageBubble(
+                        attachment: voiceAttachment,
+                        isFromCurrentUser: false
+                    )
+                } else {
+                    Text(message.content)
+                        .font(.system(size: 16))
+                        .foregroundStyle(themeManager.textPrimary(colorScheme))
+                        .lineSpacing(2)
+                }
                     
                 // Reactions
                 if !message.reactions.isEmpty {
@@ -195,11 +412,29 @@ struct TypingIndicator: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var animationStep: Int = 0
     
+    let users: [User]
+    
     let timer = Timer.publish(every: 0.3, on: .main, in: .common).autoconnect()
+    
+    private var typingText: String {
+        let names = users.map { $0.formattedName }
+        switch names.count {
+        case 1:
+            return "\(names[0]) is typing..."
+        case 2:
+            return "\(names[0]) and \(names[1]) are typing..."
+        case 3:
+            return "\(names[0]), \(names[1]) and \(names[2]) are typing..."
+        default:
+            return "Several people are typing..."
+        }
+    }
     
     var body: some View {
         HStack(spacing: 12) {
-            AvatarView(user: User.preview, size: 32)
+            if let firstUser = users.first {
+                AvatarView(user: firstUser, size: 32)
+            }
             
             HStack(spacing: 4) {
                 ForEach(0..<3) { index in
@@ -218,6 +453,10 @@ struct TypingIndicator: View {
                     .fill(themeManager.backgroundTertiary(colorScheme))
             )
             
+            Text(typingText)
+                .font(.system(size: 12))
+                .foregroundStyle(themeManager.textTertiary(colorScheme))
+            
             Spacer()
         }
         .onReceive(timer) { _ in
@@ -232,6 +471,17 @@ struct MessageInputView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Binding var text: String
     @Binding var isTyping: Bool
+    @Binding var isSending: Bool
+    @Binding var isRecording: Bool
+    
+    var onSend: () -> Void
+    var onTyping: () -> Void
+    var onVoiceRecording: (Bool) -> Void
+    var onVoiceRecordingCancelled: () -> Void
+    
+    @State private var lastTypingSent: Date = .distantPast
+    @State private var isPressing: Bool = false
+    @State private var longPressTask: Task<Void, Never>?
     
     var body: some View {
         VStack(spacing: 0) {
@@ -252,6 +502,15 @@ struct MessageInputView: View {
                         .font(.system(size: 17))
                         .foregroundStyle(themeManager.textPrimary(colorScheme))
                         .lineLimit(1...6)
+                        .onChange(of: text) { _, newValue in
+                            if !newValue.isEmpty {
+                                let now = Date()
+                                if now.timeIntervalSince(lastTypingSent) > 3 {
+                                    lastTypingSent = now
+                                    onTyping()
+                                }
+                            }
+                        }
                     
                     if !text.isEmpty {
                         Button(action: { text = "" }) {
@@ -270,22 +529,238 @@ struct MessageInputView: View {
                 
                 // Send/Action Buttons
                 if text.isEmpty {
+                    // Microphone button for voice messages
                     Button(action: {}) {
-                        Image(systemName: "face.smiling")
+                        Image(systemName: isRecording ? "waveform" : "mic.fill")
                             .font(.system(size: 24))
-                            .foregroundStyle(themeManager.textSecondary(colorScheme))
+                            .foregroundStyle(isRecording ? themeManager.accentColor.color : themeManager.textSecondary(colorScheme))
                     }
+                    .simultaneousGesture(
+                        LongPressGesture(minimumDuration: 0.3)
+                            .onEnded { _ in
+                                isRecording = true
+                                onVoiceRecording(true)
+                                HapticFeedback.medium()
+                            }
+                    )
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 0)
+                            .onEnded { _ in
+                                if isRecording {
+                                    isRecording = false
+                                    onVoiceRecording(false)
+                                }
+                            }
+                    )
                 } else {
-                    Button(action: {}) {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 32))
-                            .foregroundStyle(themeManager.accentColor.color)
+                    Button(action: onSend) {
+                        if isSending {
+                            ProgressView()
+                                .tint(themeManager.accentColor.color)
+                        } else {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.system(size: 32))
+                                .foregroundStyle(themeManager.accentColor.color)
+                        }
                     }
+                    .disabled(isSending)
                 }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(themeManager.backgroundSecondary(colorScheme))
+        }
+    }
+}
+
+// MARK: - Voice Recording Overlay
+struct VoiceRecordingOverlay: View {
+    @Environment(ThemeManager.self) private var themeManager
+    @Environment(\.colorScheme) private var colorScheme
+    
+    let duration: TimeInterval
+    var onCancel: () -> Void
+    var onSend: () -> Void
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            Divider()
+                .background(themeManager.separator(colorScheme))
+            
+            HStack(spacing: 20) {
+                // Cancel Button
+                Button(action: onCancel) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 32))
+                        .foregroundStyle(.red)
+                }
+                
+                Spacer()
+                
+                // Recording Indicator
+                HStack(spacing: 12) {
+                    // Recording dot animation
+                    RecordingDot()
+                    
+                    // Waveform placeholder
+                    HStack(spacing: 3) {
+                        ForEach(0..<20) { i in
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(themeManager.accentColor.color)
+                                .frame(width: 3, height: CGFloat.random(in: 8...32))
+                                .animation(.easeInOut(duration: 0.2).repeatForever(autoreverses: true), value: duration)
+                        }
+                    }
+                    .frame(height: 40)
+                    
+                    // Duration
+                    Text(formattedDuration)
+                        .font(.system(size: 17, weight: .medium, design: .monospaced))
+                        .foregroundStyle(themeManager.textPrimary(colorScheme))
+                }
+                
+                Spacer()
+                
+                // Send Button
+                Button(action: onSend) {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 32))
+                        .foregroundStyle(themeManager.accentColor.color)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .background(themeManager.backgroundSecondary(colorScheme))
+        }
+    }
+    
+    private var formattedDuration: String {
+        let minutes = Int(duration) / 60
+        let seconds = Int(duration) % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+}
+
+// MARK: - Recording Dot
+struct RecordingDot: View {
+    @State private var isAnimating = false
+    
+    var body: some View {
+        Circle()
+            .fill(Color.red)
+            .frame(width: 10, height: 10)
+            .opacity(isAnimating ? 1.0 : 0.5)
+            .scaleEffect(isAnimating ? 1.0 : 0.8)
+            .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: isAnimating)
+            .onAppear {
+                isAnimating = true
+            }
+    }
+}
+
+// MARK: - Voice Message Bubble
+struct VoiceMessageBubble: View {
+    @Environment(ThemeManager.self) private var themeManager
+    @Environment(\.colorScheme) private var colorScheme
+    
+    let attachment: Attachment
+    let isFromCurrentUser: Bool
+    
+    @State private var audioPlayer = AudioPlayerService.shared
+    @State private var localURL: URL?
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            // Play/Pause Button
+            Button(action: togglePlayback) {
+                Image(systemName: audioPlayer.isPlaying && audioPlayer.currentURL == localURL ? "pause.fill" : "play.fill")
+                    .font(.system(size: 20))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(
+                        Circle()
+                            .fill(themeManager.accentColor.color)
+                    )
+            }
+            
+            // Waveform & Progress
+            VStack(alignment: .leading, spacing: 6) {
+                // Waveform visualization
+                WaveformView(
+                    waveform: attachment.waveform ?? [],
+                    progress: audioPlayer.currentURL == localURL ? audioPlayer.progress : 0,
+                    color: isFromCurrentUser ? .white.opacity(0.8) : themeManager.accentColor.color
+                )
+                .frame(height: 32)
+                
+                // Duration text
+                HStack {
+                    Text(audioPlayer.currentURL == localURL ? audioPlayer.currentTimeString : "0:00")
+                        .font(.system(size: 12, design: .monospaced))
+                    
+                    Spacer()
+                    
+                    Text(formattedDuration)
+                        .font(.system(size: 12, design: .monospaced))
+                }
+                .foregroundStyle(isFromCurrentUser ? .white.opacity(0.8) : themeManager.textSecondary(colorScheme))
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(isFromCurrentUser ? themeManager.accentColor.color : themeManager.backgroundTertiary(colorScheme))
+        )
+        .onAppear {
+            // Download audio file if needed
+            // For now, use a local placeholder
+            if let url = URL(string: attachment.url) {
+                localURL = url
+            }
+        }
+    }
+    
+    private var formattedDuration: String {
+        guard let duration = attachment.duration else { return "0:00" }
+        let minutes = Int(duration) / 60
+        let seconds = Int(duration) % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+    
+    private func togglePlayback() {
+        guard let url = localURL else { return }
+        audioPlayer.togglePlayback(url: url)
+    }
+}
+
+// MARK: - Waveform View
+struct WaveformView: View {
+    let waveform: [UInt8]
+    let progress: Double
+    let color: Color
+    
+    var body: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            let barWidth: CGFloat = 3
+            let spacing: CGFloat = 2
+            let totalBars = min(Int(width / (barWidth + spacing)), waveform.count)
+            let step = max(1, waveform.count / totalBars)
+            
+            HStack(spacing: spacing) {
+                ForEach(0..<totalBars, id: \.self) { index in
+                    let dataIndex = min(index * step, waveform.count - 1)
+                    let amplitude = CGFloat(waveform[dataIndex]) / 255.0
+                    let barHeight = max(4, 32 * amplitude)
+                    let isPlayed = Double(index) / Double(totalBars) < progress
+                    
+                    RoundedRectangle(cornerRadius: barWidth / 2)
+                        .fill(isPlayed ? color : color.opacity(0.3))
+                        .frame(width: barWidth, height: barHeight)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

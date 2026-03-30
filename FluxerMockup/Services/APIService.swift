@@ -11,6 +11,7 @@ class APIService {
     
     private let baseURL = "https://api.fluxer.app/v1"
     private var authToken: String?
+    private var currentInstance: String = "fluxer.app"
     
     private var urlSession: URLSession {
         let config = URLSessionConfiguration.default
@@ -23,6 +24,59 @@ class APIService {
     
     func setAuthToken(_ token: String) {
         self.authToken = token
+    }
+    
+    func setInstance(_ instance: String) {
+        self.currentInstance = instance
+    }
+    
+    func login(instance: String, username: String, password: String) async throws -> LoginResponse {
+        setInstance(instance)
+        let body = [
+            "username": username,
+            "password": password
+        ]
+        let bodyData = try JSONEncoder.fluxer.encode(body)
+        let data = try await makeRequest(
+            endpoint: "/auth/login",
+            method: "POST",
+            body: bodyData
+        )
+        return try JSONDecoder.fluxer.decode(LoginResponse.self, from: data)
+    }
+    
+    func register(instance: String, username: String, email: String, password: String) async throws -> LoginResponse {
+        setInstance(instance)
+        let body = [
+            "username": username,
+            "email": email,
+            "password": password
+        ]
+        let bodyData = try JSONEncoder.fluxer.encode(body)
+        let data = try await makeRequest(
+            endpoint: "/auth/register",
+            method: "POST",
+            body: bodyData
+        )
+        return try JSONDecoder.fluxer.decode(LoginResponse.self, from: data)
+    }
+    
+    func refreshToken(refreshToken: String) async throws -> RefreshResponse {
+        let body = ["refresh_token": refreshToken]
+        let bodyData = try JSONEncoder.fluxer.encode(body)
+        let data = try await makeRequest(
+            endpoint: "/auth/refresh",
+            method: "POST",
+            body: bodyData
+        )
+        return try JSONDecoder.fluxer.decode(RefreshResponse.self, from: data)
+    }
+    
+    func logout() async throws {
+        _ = try await makeRequest(
+            endpoint: "/auth/logout",
+            method: "POST"
+        )
     }
     
     private func makeRequest(
@@ -117,6 +171,65 @@ class APIService {
             body: bodyData
         )
         return try JSONDecoder.fluxer.decode(Message.self, from: data)
+    }
+    
+    func sendVoiceMessage(
+        channelId: String,
+        audioURL: URL,
+        duration: TimeInterval,
+        waveform: [UInt8]
+    ) async throws -> Message {
+        // Create multipart form data
+        let boundary = UUID().uuidString
+        var request = URLRequest(url: URL(string: "\(baseURL)/channels/\(channelId)/messages")!)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        
+        if let token = authToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        
+        var body = Data()
+        
+        // Add audio file
+        let audioData = try Data(contentsOf: audioURL)
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"voice_message.m4a\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: audio/m4a\r\n\r\n".data(using: .utf8)!)
+        body.append(audioData)
+        body.append("\r\n".data(using: .utf8)!)
+        
+        // Add metadata
+        let metadata: [String: Any] = [
+            "duration": duration,
+            "waveform": waveform
+        ]
+        if let metadataData = try? JSONSerialization.data(withJSONObject: metadata) {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"attachments_metadata\"\r\n".data(using: .utf8)!)
+            body.append("Content-Type: application/json\r\n\r\n".data(using: .utf8)!)
+            body.append(metadataData)
+            body.append("\r\n".data(using: .utf8)!)
+        }
+        
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        
+        request.httpBody = body
+        
+        let (data, response) = try await urlSession.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw APIError.invalidResponse
+        }
+        
+        switch httpResponse.statusCode {
+        case 200...299:
+            return try JSONDecoder.fluxer.decode(Message.self, from: data)
+        case 401:
+            throw APIError.unauthorized
+        default:
+            throw APIError.serverError(statusCode: httpResponse.statusCode)
+        }
     }
     
     // MARK: - Call Endpoints

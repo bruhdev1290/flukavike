@@ -26,7 +26,7 @@ This project follows these design principles:
 |---------|-------------|
 | 🎨 **Theme System** | Light, Dark, OLED Dark modes with 10 accent colors |
 | 🏠 **Home Screen** | Server pills, pinned channels, recent conversations |
-| 💬 **Chat Interface** | Message bubbles, reactions, typing indicators |
+| 💬 **Chat Interface** | Message bubbles, reactions, typing indicators, voice messages |
 | 📱 **Navigation** | Customizable tab bar with floating compose button |
 | 🔔 **Notifications** | Push notifications with mentions, DMs, calls |
 | 📞 **Voice/Video Calls** | CallKit integration for calls |
@@ -173,10 +173,10 @@ enum AccentColor: String, CaseIterable, Identifiable {
 - [x] Mock data
 
 ### Phase 2: Integration
-- [ ] Fluxer API client
-- [ ] WebSocket connection
-- [ ] Real-time messaging
-- [ ] Authentication
+- [x] Fluxer API client
+- [x] WebSocket connection
+- [x] Real-time messaging
+- [x] Authentication
 
 ### Phase 3: Polish
 - [x] Custom app icons

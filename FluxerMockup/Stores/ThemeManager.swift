@@ -117,13 +117,16 @@ class ThemeManager {
 // MARK: - App State
 @Observable
 class AppState {
-    var isAuthenticated: Bool = true // Set to true for mockup preview
     var currentUser: User?
     var selectedServer: Server?
     var selectedChannel: Channel?
     var isShowingSettings: Bool = false
-    var unreadNotifications: Int = 3
-    var connectionStatus: ConnectionStatus = .connected
+    var unreadNotifications: Int = 0
+    var connectionStatus: ConnectionStatus = .disconnected
+    
+    var isAuthenticated: Bool {
+        AuthService.shared.isAuthenticated
+    }
     
     enum ConnectionStatus {
         case connected, connecting, disconnected, error(String)

@@ -19,15 +19,19 @@ struct FluxerApp: App {
     // State
     @State private var themeManager = ThemeManager()
     @State private var appState = AppState()
+    @State private var authService = AuthService.shared
     
     // View State
     @State private var showIncomingCall = false
     @State private var showActiveCall = false
     
+    // Lifecycle
+    @Environment(\.scenePhase) private var scenePhase
+    
     var body: some Scene {
         WindowGroup {
             Group {
-                if appState.isAuthenticated {
+                if authService.isAuthenticated {
                     authenticatedView
                 } else {
                     OnboardingView()
@@ -40,6 +44,9 @@ struct FluxerApp: App {
             .preferredColorScheme(themeManager.colorScheme)
             .onAppear {
                 initializeServices()
+            }
+            .onChange(of: scenePhase) { oldPhase, newPhase in
+                handleScenePhaseChange(from: oldPhase, to: newPhase)
             }
         }
     }
@@ -80,13 +87,43 @@ struct FluxerApp: App {
         setupPushNotifications()
         
         // Connect to gateway if authenticated
-        if let token = appState.authToken {
+        if let token = AuthService.shared.authToken {
             webSocketService.connect(token: token)
             apiService.setAuthToken(token)
+            
+            // Fetch current user if needed
+            Task {
+                do {
+                    let user = try await apiService.getCurrentUser()
+                    await MainActor.run {
+                        appState.currentUser = user
+                    }
+                } catch {
+                    // Token may be invalid, logout
+                    if let apiError = error as? APIError, apiError == .unauthorized {
+                        await AuthService.shared.logout()
+                    }
+                }
+            }
         }
     }
     
     private func setupWebSocketHandlers() {
+        webSocketService.onConnectionStateChange = { state in
+            switch state {
+            case .connected:
+                appState.connectionStatus = .connected
+            case .connecting, .identifying:
+                appState.connectionStatus = .connecting
+            case .reconnecting:
+                appState.connectionStatus = .connecting
+            case .disconnected:
+                appState.connectionStatus = .disconnected
+            case .error(let message):
+                appState.connectionStatus = .error(message)
+            }
+        }
+        
         webSocketService.onReady = { ready in
             appState.currentUser = ready.user
         }
@@ -172,6 +209,37 @@ struct FluxerApp: App {
             }
         }
     }
+    
+    // MARK: - Lifecycle Handling
+    
+    private func handleScenePhaseChange(from oldPhase: ScenePhase, to newPhase: ScenePhase) {
+        switch newPhase {
+        case .active:
+            // App came to foreground - reconnect WebSocket if authenticated
+            if appState.isAuthenticated, !webSocketService.isConnected {
+                if let token = AuthService.shared.authToken {
+                    webSocketService.connect(token: token)
+                }
+            }
+            
+        case .background:
+            // App went to background - optionally disconnect WebSocket after a delay
+            // to keep receiving push notifications
+            let currentPhase = newPhase
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak webSocketService] in
+                if currentPhase == .background {
+                    // Keep connection alive for push notifications, but can disconnect
+                    // if we want to save battery. For now, keep connected.
+                }
+            }
+            
+        case .inactive:
+            break
+            
+        @unknown default:
+            break
+        }
+    }
 }
 
 // MARK: - App Delegate
@@ -245,31 +313,23 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     }
 }
 
-// MARK: - App State Extension
-extension AppState {
-    var authToken: String? {
-        // Get from Keychain
-        // For mockup, return a placeholder
-        return "mock_token"
-    }
-}
-
 // MARK: - Preview
 #Preview {
     ContentView()
         .environment(ThemeManager())
         .environment(AppState())
+        .environment(AuthService.shared)
         .environment(APIService.shared)
         .environment(WebSocketService.shared)
 }
 
 // MARK: - Content View
 struct ContentView: View {
-    @Environment(AppState.self) private var appState
+    @Environment(AuthService.self) private var authService
     
     var body: some View {
         Group {
-            if appState.isAuthenticated {
+            if authService.isAuthenticated {
                 MainTabView()
             } else {
                 OnboardingView()

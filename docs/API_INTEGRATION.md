@@ -357,7 +357,7 @@ FluxerCallService.shared.activeCall = mockCall
 - [x] Send/receive messages
 - [x] Typing indicators
 - [x] Read receipts
-- [ ] File uploads
+- [x] File uploads (including voice messages)
 - [ ] Message reactions
 
 ### Phase 3: Calls

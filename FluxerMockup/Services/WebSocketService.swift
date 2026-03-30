@@ -6,7 +6,7 @@
 import SwiftUI
 
 @Observable
-class WebSocketService {
+class WebSocketService: NSObject {
     static let shared = WebSocketService()
     
     private var webSocketTask: URLSessionWebSocketTask?
@@ -21,6 +21,13 @@ class WebSocketService {
     private var sequenceNumber: Int?
     private var sessionId: String?
     
+    // Reconnection
+    private var reconnectAttempts: Int = 0
+    private var maxReconnectAttempts: Int = 10
+    private var reconnectTimer: Timer?
+    private var shouldReconnect: Bool = false
+    private var authToken: String?
+    
     // Callbacks
     var onReady: ((GatewayReady) -> Void)?
     var onMessageCreate: ((Message) -> Void)?
@@ -34,6 +41,7 @@ class WebSocketService {
     var onVoiceStateUpdate: ((VoiceState) -> Void)?
     var onSpeaking: ((String, Bool) -> Void)?
     var onNotification: ((AppNotification) -> Void)?
+    var onConnectionStateChange: ((ConnectionState) -> Void)?
     
     enum ConnectionState {
         case disconnected
@@ -47,32 +55,60 @@ class WebSocketService {
     // MARK: - Connection
     
     func connect(token: String) {
-        guard webSocketTask == nil else { return }
+        self.authToken = token
+        self.shouldReconnect = true
+        
+        guard webSocketTask == nil else {
+            // Already connected or connecting
+            return
+        }
         
         connectionState = .connecting
+        notifyConnectionStateChange()
         
         guard let url = URL(string: gatewayURL) else {
             connectionState = .error("Invalid gateway URL")
+            notifyConnectionStateChange()
             return
         }
         
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         
-        webSocketTask = URLSession.shared.webSocketTask(with: request)
-        webSocketTask?.delegate = self
+        let session = URLSession(configuration: .default, delegate: self, delegateQueue: OperationQueue())
+        webSocketTask = session.webSocketTask(with: request)
         
         receiveMessage()
         webSocketTask?.resume()
     }
     
     func disconnect() {
-        heartbeatTimer?.invalidate()
-        heartbeatTimer = nil
+        shouldReconnect = false
+        reconnectAttempts = 0
+        invalidateTimers()
+        
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
         webSocketTask = nil
+        
         isConnected = false
         connectionState = .disconnected
+        notifyConnectionStateChange()
+    }
+    
+    func reconnect() {
+        guard shouldReconnect, let token = authToken else { return }
+        
+        webSocketTask = nil
+        connectionState = .reconnecting
+        notifyConnectionStateChange()
+        
+        let delay = min(pow(2.0, Double(reconnectAttempts)), 60.0)
+        reconnectAttempts += 1
+        
+        reconnectTimer?.invalidate()
+        reconnectTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            self?.connect(token: token)
+        }
     }
     
     // MARK: - Message Handling
@@ -113,6 +149,9 @@ class WebSocketService {
         case 11: // Heartbeat ACK
             // Heartbeat acknowledged
             break
+            
+        case 7: // Reconnect
+            handleReconnect()
             
         case 9: // Invalid Session
             handleInvalidSession()
@@ -225,12 +264,20 @@ class WebSocketService {
         heartbeatInterval = interval / 1000 // Convert to seconds
         startHeartbeat()
         
-        // Send identify
+        // Send identify or resume
         connectionState = .identifying
-        sendIdentify()
+        notifyConnectionStateChange()
+        
+        if sessionId != nil && sequenceNumber != nil && reconnectAttempts > 0 {
+            sendResume()
+        } else {
+            sendIdentify()
+        }
     }
     
     private func handleReady(_ data: [String: Any]) {
+        reconnectAttempts = 0 // Reset on successful connection
+        
         if let sessionId = data["session_id"] as? String {
             self.sessionId = sessionId
         }
@@ -239,6 +286,7 @@ class WebSocketService {
             DispatchQueue.main.async { [weak self] in
                 self?.isConnected = true
                 self?.connectionState = .connected
+                self?.notifyConnectionStateChange()
                 self?.onReady?(ready)
             }
         }
@@ -248,21 +296,41 @@ class WebSocketService {
         sessionId = nil
         sequenceNumber = nil
         connectionState = .error("Invalid session")
+        notifyConnectionStateChange()
+        
+        // Re-identify after a short delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            self?.sendIdentify()
+        }
+    }
+    
+    private func handleReconnect() {
+        connectionState = .reconnecting
+        notifyConnectionStateChange()
+        webSocketTask?.cancel(with: .normalClosure, reason: nil)
+        webSocketTask = nil
+        reconnect()
     }
     
     private func handleError(_ error: Error) {
-        connectionState = .error(error.localizedDescription)
-        // Attempt reconnect
+        DispatchQueue.main.async { [weak self] in
+            self?.isConnected = false
+            self?.connectionState = .error(error.localizedDescription)
+            self?.notifyConnectionStateChange()
+            self?.webSocketTask = nil
+            self?.reconnect()
+        }
     }
     
     // MARK: - Outgoing Messages
     
     private func sendIdentify() {
-        // Get token from keychain or auth service
+        guard let token = authToken else { return }
+        
         let identify: [String: Any] = [
             "op": 2,
             "d": [
-                "token": "", // Get from auth
+                "token": token,
                 "properties": [
                     "os": "iOS",
                     "browser": "Fluxer Mobile",
@@ -277,12 +345,12 @@ class WebSocketService {
     }
     
     private func sendResume() {
-        guard let sessionId = sessionId else { return }
+        guard let token = authToken, let sessionId = sessionId else { return }
         
         let resume: [String: Any] = [
             "op": 6,
             "d": [
-                "token": "", // Get from auth
+                "token": token,
                 "session_id": sessionId,
                 "seq": sequenceNumber ?? 0
             ]
@@ -369,9 +437,28 @@ class WebSocketService {
     }
     
     private func startHeartbeat() {
-        heartbeatTimer?.invalidate()
+        invalidateHeartbeat()
         heartbeatTimer = Timer.scheduledTimer(withTimeInterval: heartbeatInterval, repeats: true) { [weak self] _ in
             self?.sendHeartbeat()
+        }
+    }
+    
+    private func invalidateHeartbeat() {
+        heartbeatTimer?.invalidate()
+        heartbeatTimer = nil
+    }
+    
+    private func invalidateTimers() {
+        invalidateHeartbeat()
+        reconnectTimer?.invalidate()
+        reconnectTimer = nil
+    }
+    
+    private func notifyConnectionStateChange() {
+        DispatchQueue.main.async { [weak self] in
+            if let state = self?.connectionState {
+                self?.onConnectionStateChange?(state)
+            }
         }
     }
     
@@ -399,6 +486,18 @@ extension WebSocketService: URLSessionWebSocketDelegate {
     ) {
         if let error = error {
             handleError(error)
+        } else {
+            // Clean disconnect
+            DispatchQueue.main.async { [weak self] in
+                self?.isConnected = false
+                self?.webSocketTask = nil
+                if self?.shouldReconnect == true {
+                    self?.reconnect()
+                } else {
+                    self?.connectionState = .disconnected
+                    self?.notifyConnectionStateChange()
+                }
+            }
         }
     }
 }

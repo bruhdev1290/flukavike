@@ -136,12 +136,23 @@ Once the app is running, try these:
 3. Long-press a message
 4. Try **Reply**, **Add Reaction**, **Copy**
 
+### Authentication Flow
+1. Use **Skip** or complete onboarding to reach the **Login** screen
+2. Enter instance, username, and password
+3. On successful login, the auth token is stored in Keychain
+4. WebSocket connects automatically
+5. Use **Settings → Sign Out** to clear the token
+
+### Voice Messages
+1. Go to **Channels** tab and enter a chat
+2. Long-press the **microphone** button (right side of input)
+3. Record your voice message (0.5s minimum, 5 minutes maximum)
+4. Release to see the recording preview
+5. Tap **send** to send, or **X** to cancel
+6. Voice messages display with waveform visualization and playback controls
+
 ### Call UI (Mock)
-1. In code, modify `AppState.swift`:
-   ```swift
-   var isAuthenticated = true  // Already set
-   ```
-2. To test incoming call, the CallService is set up but requires actual API
+1. To test incoming call, the CallService is set up but requires actual API
 
 ---
 
@@ -179,10 +190,9 @@ xcrun simctl erase all  # ⚠️ Deletes all simulator data
 
 To connect to real Fluxer servers:
 
-1. Implement OAuth/login flow
-2. Add actual API base URL
-3. Configure WebRTC for voice/video
-4. Test on physical device (requires Apple Developer Program)
+1. Update `APIService.baseURL` to point to your Fluxer instance
+2. Configure WebRTC for voice/video
+3. Test on physical device (requires Apple Developer Program)
 
 ---
 

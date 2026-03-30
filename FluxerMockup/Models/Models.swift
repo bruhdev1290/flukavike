@@ -307,9 +307,19 @@ struct Attachment: Codable, Equatable {
     let width: Int?
     let height: Int?
     let contentType: String?
+    let duration: Double?
+    let waveform: [UInt8]?
     
     var isImage: Bool {
         contentType?.starts(with: "image/") ?? false
+    }
+    
+    var isAudio: Bool {
+        contentType?.starts(with: "audio/") ?? false
+    }
+    
+    var isVoiceMessage: Bool {
+        isAudio && duration != nil
     }
 }
 

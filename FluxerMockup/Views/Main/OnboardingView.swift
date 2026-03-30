@@ -188,6 +188,7 @@ struct LoginView: View {
     @State private var password: String = ""
     @State private var isLoading: Bool = false
     @State private var showInstancePicker: Bool = false
+    @State private var errorMessage: String? = nil
     
     let popularInstances = [
         "fluxer.app",
@@ -323,6 +324,15 @@ struct LoginView: View {
                             )
                     }
                     
+                    // Error Message
+                    if let errorMessage = errorMessage {
+                        Text(errorMessage)
+                            .font(.system(size: 14))
+                            .foregroundStyle(.red)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
+                    }
+                    
                     // Sign In Button
                     Button(action: signIn) {
                         HStack {
@@ -390,12 +400,38 @@ struct LoginView: View {
     
     private func signIn() {
         isLoading = true
+        errorMessage = nil
         
-        // Simulate network request
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            isLoading = false
-            appState.isAuthenticated = true
-            dismiss()
+        Task {
+            do {
+                let response = try await AuthService.shared.login(
+                    instance: instance,
+                    username: username,
+                    password: password
+                )
+                
+                await MainActor.run {
+                    isLoading = false
+                    appState.currentUser = response.user
+                    dismiss()
+                }
+                
+                // Connect WebSocket after successful login
+                WebSocketService.shared.connect(token: response.token)
+                
+                // Register for push notifications
+                if let deviceToken = PushNotificationService.shared.deviceToken {
+                    try? await APIService.shared.registerDeviceToken(
+                        token: deviceToken,
+                        platform: "ios"
+                    )
+                }
+            } catch {
+                await MainActor.run {
+                    isLoading = false
+                    errorMessage = "Invalid username or password"
+                }
+            }
         }
     }
 }

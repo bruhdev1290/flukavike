@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Bundle Information -->
+    <key>CFBundleDevelopmentRegion</key>
+    <string>$(DEVELOPMENT_LANGUAGE)</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>$(PRODUCT_NAME)</string>
+    <key>CFBundlePackageType</key>
+    <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    
+    <!-- Required Device Capabilities -->
+    <key>UIRequiredDeviceCapabilities</key>
+    <array>
+        <string>armv7</string>
+    </array>
+    
+    <!-- Supported Interface Orientations -->
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    
+    <!-- Privacy Descriptions -->
+    <!-- Microphone - Required for voice messages and calls -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Fluxer needs microphone access to record and send voice messages, and for voice calls.</string>
+    
+    <!-- Camera - Required for video calls and taking photos -->
+    <key>NSCameraUsageDescription</key>
+    <string>Fluxer needs camera access for video calls and to take photos for sharing.</string>
+    
+    <!-- Photo Library - Required for sharing images/videos -->
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Fluxer needs photo library access to share images and videos in messages.</string>
+    
+    <!-- Local Network - Required for WebRTC voice/video calls -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Fluxer uses local network discovery to find the best connection for voice and video calls.</string>
+    
+    <!-- User Notifications - Required for push notifications -->
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>remote-notification</string>
+        <string>voip</string>
+        <string>audio</string>
+    </array>
+</dict>
+</plist>
