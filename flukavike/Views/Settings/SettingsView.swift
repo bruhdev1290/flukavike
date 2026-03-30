@@ -35,7 +35,7 @@ struct SettingsView: View {
                         icon: "lock.fill",
                         iconColor: .green,
                         title: "Privacy & Security",
-                        subtitle: "Encryption, 2FA, Sessions"
+                        subtitle: "2FA, Sessions, Privacy"
                     ) {}
                 }
                 

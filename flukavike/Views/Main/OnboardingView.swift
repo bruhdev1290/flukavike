@@ -32,7 +32,7 @@ struct OnboardingView: View {
         OnboardingPage(
             icon: "lock.shield.fill",
             title: "Privacy First",
-            description: "End-to-end encryption, self-hosting options, and transparent data practices. You own your data."
+            description: "Self-hosting options, transparent data practices, and tools that keep your community in control. You own your data."
         )
     ]
     
