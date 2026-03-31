@@ -36,6 +36,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				490DAED12F7AC500005C1B5A /* HCaptcha in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -78,6 +79,7 @@
 			);
 			name = flukavike;
 			packageProductDependencies = (
+				490DAED02F7AC500005C1B5A /* HCaptcha */,
 			);
 			productName = flukavike;
 			productReference = 490DADBE2F7AB4FB005C1B5A /* flukavike.app */;
@@ -107,6 +109,9 @@
 			);
 			mainGroup = 490DADB52F7AB4FB005C1B5A;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				490DAECF2F7AC500005C1B5A /* XCRemoteSwiftPackageReference "HCaptcha-ios-sdk" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 490DADBF2F7AB4FB005C1B5A /* Products */;
 			projectDirPath = "";
@@ -353,5 +358,25 @@
 		};
 /* End XCConfigurationList section */
 	};
+
+/* Begin PBXPackageDependency section */
+		490DAED02F7AC500005C1B5A /* HCaptcha */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 490DAECF2F7AC500005C1B5A /* XCRemoteSwiftPackageReference "HCaptcha-ios-sdk" */;
+			productName = HCaptcha;
+		};
+/* End PBXPackageDependency section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		490DAECF2F7AC500005C1B5A /* XCRemoteSwiftPackageReference "HCaptcha-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/hCaptcha/HCaptcha-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.8.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 	rootObject = 490DADB62F7AB4FB005C1B5A /* Project object */;
 }

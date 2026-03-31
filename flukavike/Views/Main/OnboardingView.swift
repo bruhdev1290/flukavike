@@ -409,8 +409,7 @@ struct LoginView: View {
             }
             .sheet(isPresented: $showCaptcha) {
                 HCaptchaSheetView(
-                    siteKey: captchaSiteKey,
-                    hostURL: Self.captchaHostURL()
+                    siteKey: captchaSiteKey
                 ) { token in
                     captchaToken = token
                     signIn()
@@ -419,19 +418,7 @@ struct LoginView: View {
         }
     }
     
-    /// Uses the discovered web origin for the captcha host.
-    /// hCaptcha sitekeys are usually registered against the public web app host,
-    /// not the API subdomain.
-    private static func captchaHostURL() -> URL {
-        if let url = URL(string: APIService.shared.webBaseURL) {
-            return url
-        }
-        if let url = URL(string: "https://\(APIService.shared.currentInstance)") {
-            return url
-        }
-        return URL(string: "https://fluxer.app")!
-    }
-    
+
     private var canSignIn: Bool {
         !instance.isEmpty && !username.isEmpty && !password.isEmpty
     }
@@ -727,8 +714,7 @@ struct RegistrationView: View {
             }
             .sheet(isPresented: $showCaptcha) {
                 HCaptchaSheetView(
-                    siteKey: captchaSiteKey,
-                    hostURL: Self.captchaHostURL()
+                    siteKey: captchaSiteKey
                 ) { token in
                     captchaToken = token
                     register()
@@ -737,16 +723,7 @@ struct RegistrationView: View {
         }
     }
     
-    private static func captchaHostURL() -> URL {
-        if let url = URL(string: APIService.shared.webBaseURL) {
-            return url
-        }
-        if let url = URL(string: "https://\(APIService.shared.currentInstance)") {
-            return url
-        }
-        return URL(string: "https://fluxer.app")!
-    }
-    
+
     private var canRegister: Bool {
         !instance.isEmpty && !username.isEmpty && !email.isEmpty && !password.isEmpty
     }

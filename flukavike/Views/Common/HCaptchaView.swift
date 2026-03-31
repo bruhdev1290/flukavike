@@ -1,16 +1,76 @@
 //
 //  HCaptchaView.swift
-//  hCaptcha verification component
+//  hCaptcha verification component using official SDK
 //
 
 import SwiftUI
-import WebKit
+import HCaptcha
 
-// MARK: - HCaptcha WebView
+// MARK: - HCaptcha Manager
 
-struct HCaptchaView: UIViewRepresentable {
+/// Manages the shared HCaptcha instance and validation flow
+@MainActor
+class HCaptchaManager: ObservableObject {
+    static let shared = HaptchaManager()
+    
+    private var hcaptcha: HCaptcha?
+    private var isConfigured = false
+    
+    /// Configure the HCaptcha instance with a site key
+    func configure(siteKey: String) {
+        guard !isConfigured || hcaptcha == nil else { return }
+        
+        hcaptcha = try? HCaptcha(
+            apiKey: siteKey,
+            baseURL: nil,
+            locale: nil,
+            size: .compact
+        )
+        isConfigured = true
+    }
+    
+    /// Reset configuration when switching instances
+    func reset() {
+        hcaptcha = nil
+        isConfigured = false
+    }
+    
+    /// Validate and get token
+    func validate(on viewController: UIViewController, completion: @escaping (Result<String, Error>) -> Void) {
+        guard let hcaptcha = hcaptcha else {
+            completion(.failure(HCaptchaError.notConfigured))
+            return
+        }
+        
+        hcaptcha.validate(on: viewController) { result in
+            switch result {
+            case .token(let token):
+                completion(.success(token))
+            case .error(let error):
+                completion(.failure(error))
+            }
+        }
+    }
+}
+
+enum HCaptchaError: LocalizedError {
+    case notConfigured
+    case validationFailed(String)
+    
+    var errorDescription: String? {
+        switch self {
+        case .notConfigured:
+            return "hCaptcha not configured"
+        case .validationFailed(let message):
+            return message
+        }
+    }
+}
+
+// MARK: - HCaptcha SwiftUI View
+
+struct HCaptchaView: UIViewControllerRepresentable {
     let siteKey: String
-    let hostURL: URL
     let onToken: (String) -> Void
     let onError: (String) -> Void
     
@@ -18,93 +78,19 @@ struct HCaptchaView: UIViewRepresentable {
         Coordinator(onToken: onToken, onError: onError)
     }
     
-    func makeUIView(context: Context) -> WKWebView {
-        let config = WKWebViewConfiguration()
-        let contentController = WKUserContentController()
-        contentController.add(context.coordinator, name: "captcha")
-        config.userContentController = contentController
-        
-        let webView = WKWebView(frame: .zero, configuration: config)
-        webView.isOpaque = false
-        webView.backgroundColor = .clear
-        webView.scrollView.backgroundColor = .clear
-        webView.navigationDelegate = context.coordinator
-        return webView
+    func makeUIViewController(context: Context) -> UIViewController {
+        let viewController = HCaptchaViewController()
+        viewController.siteKey = siteKey
+        viewController.onToken = onToken
+        viewController.onError = onError
+        return viewController
     }
     
-    func updateUIView(_ webView: WKWebView, context: Context) {
-        guard !context.coordinator.hasLoaded else { return }
-        context.coordinator.hasLoaded = true
-
-        guard let captchaHost = Self.captchaHost(from: hostURL) else {
-            onError("Failed to determine captcha host from \(hostURL.absoluteString)")
-            return
-        }
-
-        let html = Self.captchaHTML(siteKey: siteKey, host: captchaHost)
-        webView.loadHTMLString(html, baseURL: Self.localBaseURL)
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {
+        // No updates needed
     }
     
-    private static let localBaseURL = URL(string: "http://localhost")!
-
-    private static func captchaHost(from url: URL) -> String? {
-        url.host()
-    }
-
-    static func captchaHTML(siteKey: String, host: String) -> String {
-        """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-            <style>
-                body {
-                    display: flex;
-                    justify-content: center;
-                    align-items: center;
-                    min-height: 100vh;
-                    margin: 0;
-                    background: transparent;
-                }
-            </style>
-        </head>
-        <body>
-            <div id="captcha-container"></div>
-            <script src="https://js.hcaptcha.com/1/api.js?onload=onHCaptchaLoad&render=explicit&host=\(host)" async defer></script>
-            <script>
-                function onSuccess(token) {
-                    window.webkit.messageHandlers.captcha.postMessage(
-                        JSON.stringify({ type: "token", value: token })
-                    );
-                }
-                function onError(err) {
-                    window.webkit.messageHandlers.captcha.postMessage(
-                        JSON.stringify({ type: "error", value: String(err) })
-                    );
-                }
-                function onExpired() {
-                    window.webkit.messageHandlers.captcha.postMessage(
-                        JSON.stringify({ type: "expired", value: "Captcha expired" })
-                    );
-                }
-                function onHCaptchaLoad() {
-                    hcaptcha.render('captcha-container', {
-                        sitekey: '\(siteKey)',
-                        callback: onSuccess,
-                        'error-callback': onError,
-                        'expired-callback': onExpired
-                    });
-                }
-            </script>
-        </body>
-        </html>
-        """
-    }
-    
-    // MARK: - Coordinator
-    
-    class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
-        var hasLoaded = false
+    class Coordinator {
         let onToken: (String) -> Void
         let onError: (String) -> Void
         
@@ -112,39 +98,104 @@ struct HCaptchaView: UIViewRepresentable {
             self.onToken = onToken
             self.onError = onError
         }
+    }
+}
+
+// MARK: - HCaptcha View Controller
+
+/// UIViewController that hosts the hCaptcha challenge
+class HCaptchaViewController: UIViewController {
+    var siteKey: String?
+    var onToken: ((String) -> Void)?
+    var onError: ((String) -> Void)?
+    
+    private var hcaptcha: HCaptcha?
+    private var hasPresentedCaptcha = false
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .clear
         
-        func userContentController(
-            _ userContentController: WKUserContentController,
-            didReceive message: WKScriptMessage
-        ) {
-            guard let body = message.body as? String,
-                  let data = body.data(using: .utf8),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: String],
-                  let type = json["type"],
-                  let value = json["value"] else { return }
+        // Add a loading indicator
+        let spinner = UIActivityIndicatorView(style: .large)
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        spinner.startAnimating()
+        view.addSubview(spinner)
+        NSLayoutConstraint.activate([
+            spinner.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            spinner.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+        ])
+    }
+    
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        
+        guard !hasPresentedCaptcha else { return }
+        hasPresentedCaptcha = true
+        
+        guard let siteKey = siteKey else {
+            onError?("Site key not provided")
+            return
+        }
+        
+        // Initialize hCaptcha with site key
+        do {
+            hcaptcha = try HCaptcha(
+                apiKey: siteKey,
+                baseURL: nil,
+                locale: nil,
+                size: .compact
+            )
             
-            DispatchQueue.main.async {
-                switch type {
-                case "token":
-                    self.onToken(value)
-                case "error", "expired":
-                    self.onError(value)
-                default:
-                    break
+            // Configure webview appearance
+            hcaptcha?.configureWebView { webview in
+                webview.frame = self.view.bounds
+                webview.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                webview.backgroundColor = .clear
+                webview.isOpaque = false
+            }
+            
+            // Validate and present
+            hcaptcha?.validate(on: self) { [weak self] result in
+                guard let self = self else { return }
+                
+                DispatchQueue.main.async {
+                    switch result {
+                    case .token(let token):
+                        self.onToken?(token)
+                    case .error(let error):
+                        self.onError?(self.errorMessage(for: error))
+                    }
                 }
             }
+            
+        } catch {
+            onError?("Failed to initialize hCaptcha: \(error.localizedDescription)")
         }
-        
-        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-            onError("Failed to load captcha: \(error.localizedDescription)")
-        }
-
-        func webView(
-            _ webView: WKWebView,
-            didFailProvisionalNavigation navigation: WKNavigation!,
-            withError error: Error
-        ) {
-            onError("Failed to load captcha: \(error.localizedDescription)")
+    }
+    
+    private func errorMessage(for error: HCaptchaError) -> String {
+        switch error {
+        case .invalidAPIKey:
+            return "Invalid site key"
+        case .invalidLocale:
+            return "Invalid locale configuration"
+        case .invalidCallback:
+            return "Invalid callback configuration"
+        case .badURL:
+            return "Failed to load challenge"
+        case .challengeClosed:
+            return "Verification was cancelled"
+        case .challengeExpired:
+            return "Verification expired, please try again"
+        case .tokenExpired:
+            return "Token expired, please try again"
+        case .retryLimitReached:
+            return "Too many attempts, please try again later"
+        case .networkError:
+            return "Network error, please check your connection"
+        @unknown default:
+            return "Verification failed: \(error.localizedDescription)"
         }
     }
 }
@@ -157,7 +208,6 @@ struct HCaptchaSheetView: View {
     @Environment(\.dismiss) private var dismiss
     
     let siteKey: String
-    let hostURL: URL
     let onCompleted: (String) -> Void
     
     @State private var errorMessage: String?
@@ -182,7 +232,6 @@ struct HCaptchaSheetView: View {
                 
                 HCaptchaView(
                     siteKey: siteKey,
-                    hostURL: hostURL,
                     onToken: { token in
                         onCompleted(token)
                         dismiss()
