@@ -32,7 +32,8 @@ class APIService {
     init() {
         // Set default instance on initialization
         self.currentInstance = Self.defaultInstance
-        self.apiBaseURL = "https://api.fluxer.app"
+        // Use endpoints from the discovery document (matching Dart SDK)
+        self.apiBaseURL = "https://api.fluxer.app/v1"
         self.webBaseURL = "https://web.fluxer.app"
         self.gatewayURL = "wss://gateway.fluxer.app"
     }

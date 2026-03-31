@@ -29,7 +29,9 @@ class WebAuthService: NSObject {
     
     // MARK: - Constants
     
-    /// The central Fluxer web instance
+    /// The central Fluxer web instance (matching Dart SDK)
+    static let apiHost = "api.fluxer.app"
+    static let apiBaseURL = "https://api.fluxer.app/v1"
     static let webInstanceHost = "web.fluxer.app"
     static let webInstanceURL = "https://web.fluxer.app"
     static let authCallbackScheme = "flukavike"
@@ -91,8 +93,13 @@ class WebAuthService: NSObject {
         self.authCompletion = completion
         
         // Build the web auth URL
-        // The web interface handles login and redirects back with a token
-        let authURLString = "\(Self.webInstanceURL)/auth/mobile?client=flukavike&redirect=\(Self.authCallbackScheme)://\(Self.authCallbackPath)"
+        // Open the web app login page. After successful login,
+        // the web app should support redirecting back to the mobile app.
+        // Common patterns: /login?redirect=, /auth?callback=, etc.
+        // 
+        // For now, we open the main app and the user can login there.
+        // The web app needs to support mobile redirect for this to work properly.
+        let authURLString = "\(Self.webInstanceURL)/login?redirect=\(Self.authCallbackScheme)://\(Self.authCallbackPath)"
         
         guard let authURL = URL(string: authURLString) else {
             completion(.failure(WebAuthError.invalidURL))
@@ -171,8 +178,8 @@ class WebAuthService: NSObject {
                 APIService.shared.setAuthToken(token)
                 APIService.shared.setInstance(Self.webInstanceHost)
                 
-                // Discover endpoints
-                try await APIService.shared.discoverInstance(Self.webInstanceHost)
+                // Discover endpoints from api.fluxer.app (matching Dart SDK)
+                try await APIService.shared.discoverInstance(Self.apiHost)
                 
                 // Fetch current user
                 let user = try await APIService.shared.getCurrentUser()
@@ -278,8 +285,8 @@ class WebAuthService: NSObject {
             APIService.shared.setAuthToken(legacyToken)
             APIService.shared.setInstance(Self.webInstanceHost)
             
-            // Discover and fetch user
-            try await APIService.shared.discoverInstance(Self.webInstanceHost)
+            // Discover from api.fluxer.app and fetch user (matching Dart SDK)
+            try await APIService.shared.discoverInstance(Self.apiHost)
             let user = try await APIService.shared.getCurrentUser()
             
             let session = WebSession(

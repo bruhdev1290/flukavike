@@ -18,6 +18,7 @@ struct WebLoginView: View {
     @State private var errorMessage: String?
     @State private var showAdvancedOptions = false
     @State private var customInstance: String = ""
+    @State private var showAPILogin = false
     
     var body: some View {
         NavigationStack {
@@ -69,20 +70,15 @@ struct WebLoginView: View {
                     .transition(.opacity)
                 }
                 
-                // Main Sign In Button
+                // Main Sign In Button - API Login (Primary)
                 VStack(spacing: 16) {
-                    Button(action: signInWithWeb) {
+                    Button(action: { showAPILogin = true }) {
                         HStack(spacing: 12) {
-                            if isAuthenticating {
-                                ProgressView()
-                                    .tint(.white)
-                            } else {
-                                Image(systemName: "globe")
-                                    .font(.system(size: 20))
-                                
-                                Text("Sign in with Fluxer")
-                                    .font(.system(size: 17, weight: .semibold))
-                            }
+                            Image(systemName: "person.fill")
+                                .font(.system(size: 20))
+                            
+                            Text("Sign in with Username")
+                                .font(.system(size: 17, weight: .semibold))
                         }
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
@@ -92,10 +88,9 @@ struct WebLoginView: View {
                                 .fill(themeManager.accentColor.color)
                         )
                     }
-                    .disabled(isAuthenticating)
                     
                     // Subtitle explaining the flow
-                    Text("You'll be redirected to web.fluxer.app to sign in securely")
+                    Text("Use your Fluxer username and password")
                         .font(.system(size: 13))
                         .foregroundStyle(themeManager.textTertiary(colorScheme))
                         .multilineTextAlignment(.center)
@@ -120,37 +115,67 @@ struct WebLoginView: View {
                     }
                     
                     if showAdvancedOptions {
-                        VStack(spacing: 12) {
-                            Text("Custom Instance")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(themeManager.textSecondary(colorScheme))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            
-                            HStack(spacing: 12) {
-                                TextField("instance.example.com", text: $customInstance)
-                                    .font(.system(size: 15))
-                                    .foregroundStyle(themeManager.textPrimary(colorScheme))
-                                    .padding(12)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .fill(themeManager.backgroundTertiary(colorScheme))
-                                    )
-                                    .autocorrectionDisabled()
-                                    .textInputAutocapitalization(.never)
-                                    .keyboardType(.URL)
-                                
-                                Button(action: signInWithCustomInstance) {
-                                    Text("Connect")
-                                        .font(.system(size: 15, weight: .medium))
+                        VStack(spacing: 16) {
+                            // Web Login Option (in Safari)
+                            Button(action: signInWithWeb) {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "safari")
+                                        .font(.system(size: 20))
                                         .foregroundStyle(themeManager.accentColor.color)
+                                    
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Sign in via Web")
+                                            .font(.system(size: 16, weight: .medium))
+                                            .foregroundStyle(themeManager.textPrimary(colorScheme))
+                                        
+                                        Text("Open web.fluxer.app in Safari")
+                                            .font(.system(size: 13))
+                                            .foregroundStyle(themeManager.textSecondary(colorScheme))
+                                    }
+                                    
+                                    Spacer()
+                                    
+                                    Image(systemName: "arrow.up.right.square")
+                                        .font(.system(size: 16))
+                                        .foregroundStyle(themeManager.textTertiary(colorScheme))
                                 }
-                                .disabled(customInstance.isEmpty)
                             }
+                            .buttonStyle(.plain)
+                            .disabled(isAuthenticating)
                             
-                            Text("For self-hosted instances that connect to the Fluxer network")
-                                .font(.system(size: 12))
-                                .foregroundStyle(themeManager.textTertiary(colorScheme))
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Divider()
+                            
+                            // Custom Instance Option
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Custom Instance")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(themeManager.textSecondary(colorScheme))
+                                
+                                HStack(spacing: 12) {
+                                    TextField("instance.example.com", text: $customInstance)
+                                        .font(.system(size: 15))
+                                        .foregroundStyle(themeManager.textPrimary(colorScheme))
+                                        .padding(12)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .fill(themeManager.backgroundTertiary(colorScheme))
+                                        )
+                                        .autocorrectionDisabled()
+                                        .textInputAutocapitalization(.never)
+                                        .keyboardType(.URL)
+                                    
+                                    Button(action: signInWithCustomInstance) {
+                                        Text("Connect")
+                                            .font(.system(size: 15, weight: .medium))
+                                            .foregroundStyle(themeManager.accentColor.color)
+                                    }
+                                    .disabled(customInstance.isEmpty)
+                                }
+                                
+                                Text("For self-hosted instances")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(themeManager.textTertiary(colorScheme))
+                            }
                         }
                         .padding(16)
                         .background(
@@ -192,6 +217,9 @@ struct WebLoginView: View {
                     }
                     .foregroundStyle(themeManager.textPrimary(colorScheme))
                 }
+            }
+            .sheet(isPresented: $showAPILogin) {
+                WebAPILoginView()
             }
         }
     }
