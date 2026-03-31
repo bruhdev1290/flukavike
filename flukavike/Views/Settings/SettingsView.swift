@@ -11,10 +11,11 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     
     @State private var searchText: String = ""
+    @State private var showAddAccount = false
     
     private func signOut() {
         Task {
-            await AuthService.shared.logout()
+            await WebAuthService.shared.logout()
             WebSocketService.shared.disconnect()
         }
     }
@@ -135,27 +136,55 @@ struct SettingsView: View {
                     )
                 }
                 
-                // Instances Section
-                Section("Instances") {
-                    NavigationLink {
-                        InstanceSettingsView()
-                    } label: {
-                        SettingsRow(
-                            icon: "server.rack",
-                            iconColor: .gray,
-                            title: "Manage Instances",
-                            subtitle: "3 connected servers",
-                            showArrow: false
-                        ) {}
+                // Account Section (WebAuth)
+                Section("Account") {
+                    if let user = WebAuthService.shared.currentUser {
+                        HStack(spacing: 12) {
+                            // Avatar placeholder
+                            ZStack {
+                                Circle()
+                                    .fill(themeManager.accentColor.color.opacity(0.2))
+                                    .frame(width: 44, height: 44)
+                                
+                                Text(String(user.username.prefix(1).uppercased()))
+                                    .font(.system(size: 18, weight: .bold))
+                                    .foregroundStyle(themeManager.accentColor.color)
+                            }
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(user.displayName ?? user.username)
+                                    .font(.system(size: 17, weight: .semibold))
+                                    .foregroundStyle(themeManager.textPrimary(colorScheme))
+                                
+                                Text("@\(user.username)@web.fluxer.app")
+                                    .font(.system(size: 15))
+                                    .foregroundStyle(themeManager.textSecondary(colorScheme))
+                            }
+                            
+                            Spacer()
+                            
+                            // Connection status
+                            Circle()
+                                .fill(Color.green)
+                                .frame(width: 10, height: 10)
+                        }
+                        .padding(.vertical, 4)
                     }
-                    .listRowBackground(themeManager.backgroundPrimary(colorScheme))
                     
-                    SettingsRow(
-                        icon: "plus.circle.fill",
-                        iconColor: themeManager.accentColor.color,
-                        title: "Add Instance",
-                        subtitle: nil
-                    ) {}
+                    Button(action: { showAddAccount = true }) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "person.badge.plus")
+                                .font(.system(size: 20))
+                                .foregroundStyle(themeManager.accentColor.color)
+                                .frame(width: 44, height: 44)
+                            
+                            Text("Add Account")
+                                .font(.system(size: 17))
+                                .foregroundStyle(themeManager.accentColor.color)
+                            
+                            Spacer()
+                        }
+                    }
                 }
                 
                 // Advanced Section
@@ -241,6 +270,9 @@ struct SettingsView: View {
                 }
             }
             .searchable(text: $searchText)
+            .sheet(isPresented: $showAddAccount) {
+                WebLoginView()
+            }
         }
     }
 }
@@ -406,75 +438,67 @@ struct NotificationSettingsView: View {
     }
 }
 
-// MARK: - Instance Settings
+// MARK: - Instance Settings (Simplified for web.fluxer.app)
 struct InstanceSettingsView: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(\.colorScheme) private var colorScheme
     
-    @State private var instances: [Server] = Server.previewServers
-    
     var body: some View {
         List {
             Section {
-                ForEach(instances) { instance in
-                    HStack(spacing: 12) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(themeManager.accentColor.color.opacity(0.15))
-                                .frame(width: 44, height: 44)
-                            
-                            Text(String(instance.name.prefix(1)))
-                                .font(.system(size: 20, weight: .bold))
-                                .foregroundStyle(themeManager.accentColor.color)
-                        }
+                HStack(spacing: 12) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(themeManager.accentColor.color.opacity(0.15))
+                            .frame(width: 44, height: 44)
                         
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(instance.name)
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundStyle(themeManager.textPrimary(colorScheme))
-                            
-                            Text(instance.instance)
-                                .font(.system(size: 15))
-                                .foregroundStyle(themeManager.textSecondary(colorScheme))
-                        }
-                        
-                        Spacer()
-                        
-                        // Connection Status
-                        Circle()
-                            .fill(Color.green)
-                            .frame(width: 10, height: 10)
+                        Image(systemName: "globe")
+                            .font(.system(size: 20))
+                            .foregroundStyle(themeManager.accentColor.color)
                     }
-                    .padding(.vertical, 4)
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Fluxer Web")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(themeManager.textPrimary(colorScheme))
+                        
+                        Text("web.fluxer.app")
+                            .font(.system(size: 15))
+                            .foregroundStyle(themeManager.textSecondary(colorScheme))
+                        
+                        Text("Connected")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.green)
+                    }
+                    
+                    Spacer()
                 }
-                .onDelete(perform: deleteInstance)
+                .padding(.vertical, 4)
             }
             
             Section {
-                Button(action: {}) {
-                    HStack {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.system(size: 22))
-                            .foregroundStyle(themeManager.accentColor.color)
-                        
-                        Text("Add Instance")
-                            .font(.system(size: 17))
-                            .foregroundStyle(themeManager.accentColor.color)
-                    }
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Centralized Instance", systemImage: "server.rack")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(themeManager.textPrimary(colorScheme))
+                    
+                    Text("Flukavike connects to web.fluxer.app as the central Fluxer instance. All your servers and conversations are managed through this instance.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(themeManager.textSecondary(colorScheme))
+                        .lineLimit(4)
                 }
+                .padding(.vertical, 4)
             }
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(themeManager.backgroundPrimary(colorScheme))
-        .navigationTitle("Instances")
+        .navigationTitle("Instance")
         .navigationBarTitleDisplayMode(.inline)
     }
-    
-    private func deleteInstance(at offsets: IndexSet) {
-        instances.remove(atOffsets: offsets)
-    }
 }
+
+
 
 // MARK: - Preview
 #Preview {

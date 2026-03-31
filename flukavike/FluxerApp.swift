@@ -16,6 +16,7 @@ struct FluxerApp: App {
     @State private var webSocketService = WebSocketService.shared
     @State private var callService = FlukavikeCallService.shared
     @State private var pushService = PushNotificationService.shared
+    @State private var webAuthService = WebAuthService.shared
     
     // State
     @State private var themeManager = ThemeManager()
@@ -32,7 +33,7 @@ struct FluxerApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if authService.isAuthenticated {
+                if webAuthService.isAuthenticated {
                     authenticatedView
                 } else {
                     OnboardingView()
@@ -42,6 +43,7 @@ struct FluxerApp: App {
             .environment(appState)
             .environment(apiService)
             .environment(webSocketService)
+            .environment(webAuthService)
             .preferredColorScheme(themeManager.colorScheme)
             .onAppear {
                 initializeServices()
@@ -87,24 +89,33 @@ struct FluxerApp: App {
         // Setup Push notifications
         setupPushNotifications()
         
-        // Connect to gateway if authenticated
-        if let token = AuthService.shared.authToken {
-            webSocketService.connect(token: token)
-            apiService.setAuthToken(token)
+        // Try to migrate from legacy auth if needed
+        Task {
+            await webAuthService.migrateFromLegacyIfNeeded()
             
-            // Fetch current user if needed
-            Task {
-                do {
-                    let user = try await apiService.getCurrentUser()
-                    await MainActor.run {
-                        appState.currentUser = user
-                    }
-                } catch {
-                    // Token may be invalid, logout
-                    if case APIError.unauthorized = error {
-                        await AuthService.shared.logout()
-                    }
+            // Connect to gateway if authenticated
+            await MainActor.run {
+                connectIfAuthenticated()
+            }
+        }
+    }
+    
+    private func connectIfAuthenticated() {
+        guard let session = WebAuthService.shared.currentSession else { return }
+        
+        // Discover endpoints if needed
+        Task {
+            if apiService.gatewayURL.isEmpty {
+                try? await apiService.discoverInstance(WebAuthService.webInstanceHost)
+            }
+            
+            await MainActor.run {
+                let gatewayURL = apiService.gatewayURL
+                if !gatewayURL.isEmpty {
+                    webSocketService.setGatewayURL(gatewayURL)
                 }
+                webSocketService.connect(token: session.token)
+                appState.currentUser = session.user
             }
         }
     }
@@ -217,22 +228,14 @@ struct FluxerApp: App {
         switch newPhase {
         case .active:
             // App came to foreground - reconnect WebSocket if authenticated
-            if appState.isAuthenticated, !webSocketService.isConnected {
-                if let token = AuthService.shared.authToken {
-                    webSocketService.connect(token: token)
-                }
+            if appState.isAuthenticated, !webSocketService.isConnected,
+               let session = WebAuthService.shared.currentSession {
+                webSocketService.connect(token: session.token)
             }
             
         case .background:
-            // App went to background - optionally disconnect WebSocket after a delay
-            // to keep receiving push notifications
-            let currentPhase = newPhase
-            DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak webSocketService] in
-                if currentPhase == .background {
-                    // Keep connection alive for push notifications, but can disconnect
-                    // if we want to save battery. For now, keep connected.
-                }
-            }
+            // App went to background - keep WebSocket connected for push notifications
+            break
             
         case .inactive:
             break
@@ -485,22 +488,32 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         .environment(ThemeManager())
         .environment(AppState())
         .environment(AuthService.shared)
+        .environment(WebAuthService.shared)
         .environment(APIService.shared)
         .environment(WebSocketService.shared)
 }
 
 // MARK: - Content View
 struct ContentView: View {
-    @Environment(AuthService.self) private var authService
+    @Environment(WebAuthService.self) private var webAuthService
     
     var body: some View {
         Group {
-            if authService.isAuthenticated {
+            if webAuthService.isAuthenticated {
                 MainTabView()
             } else {
                 OnboardingView()
             }
         }
+    }
+}
+
+// MARK: - URL Handling Extension
+extension AppDelegate {
+    func handleWebAuthCallback(url: URL) -> Bool {
+        // The WebAuthService handles the callback internally via ASWebAuthenticationSession
+        // This is just for additional deep link handling if needed
+        return false
     }
 }
 

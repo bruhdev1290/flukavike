@@ -125,7 +125,7 @@ class AppState {
     var connectionStatus: ConnectionStatus = .disconnected
     
     var isAuthenticated: Bool {
-        AuthService.shared.isAuthenticated
+        WebAuthService.shared.isAuthenticated
     }
     
     enum ConnectionStatus {

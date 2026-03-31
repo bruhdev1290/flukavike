@@ -110,13 +110,22 @@ struct OnboardingView: View {
                                 .padding(.vertical, 12)
                         }
                     }
+                    
+                    if currentPage == pages.count - 1 {
+                        Button(action: { showLogin = true }) {
+                            Text("I already have an account")
+                                .font(.system(size: 17, weight: .medium))
+                                .foregroundStyle(themeManager.accentColor.color)
+                                .padding(.vertical, 12)
+                        }
+                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 34)
             }
         }
         .sheet(isPresented: $showLogin) {
-            LoginView()
+            WebLoginView()
         }
     }
 }

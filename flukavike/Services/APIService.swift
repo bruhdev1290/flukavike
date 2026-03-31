@@ -10,6 +10,9 @@ class APIService {
     static let shared = APIService()
     static let fallbackHCaptchaSiteKey = "9cbad400-df84-4e0c-bda6-e65000be78aa"
     
+    /// Default Fluxer web instance
+    static let defaultInstance = "web.fluxer.app"
+    
     private var authToken: String?
     private(set) var currentInstance: String = ""
     
@@ -23,6 +26,39 @@ class APIService {
     var captchaRequired: Bool { captchaConfig != nil }
     
     private var baseURL: String { apiBaseURL }
+    
+    // MARK: - Initialization
+    
+    init() {
+        // Set default instance on initialization
+        self.currentInstance = Self.defaultInstance
+        self.apiBaseURL = "https://api.fluxer.app"
+        self.webBaseURL = "https://web.fluxer.app"
+        self.gatewayURL = "wss://gateway.fluxer.app"
+    }
+    
+    // MARK: - URL Configuration
+    
+    /// Sets custom base URLs for an instance (used by WebAuthService after discovery)
+    func setCustomBaseURLs(api: String, gateway: String, web: String) {
+        self.apiBaseURL = api.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        self.gatewayURL = gateway
+        self.webBaseURL = web.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+    
+    /// Clears the current captcha configuration
+    func clearCaptchaConfig() {
+        self.captchaConfig = nil
+    }
+    
+    /// Resets to default Fluxer instance URLs
+    func resetToDefaultInstance() {
+        self.currentInstance = Self.defaultInstance
+        self.apiBaseURL = "https://api.fluxer.app"
+        self.webBaseURL = "https://web.fluxer.app"
+        self.gatewayURL = "wss://gateway.fluxer.app"
+        self.captchaConfig = nil
+    }
     
     private var urlSession: URLSession {
         let config = URLSessionConfiguration.default
@@ -533,6 +569,26 @@ struct InstanceConfig: Decodable {
     let admin: String?
     let invite: String?
     let captcha: CaptchaConfig?
+    
+    // Extended fields for federation/instance discovery
+    let name: String?
+    let description: String?
+    let icon: String?
+    let banner: String?
+    let publicInstance: Bool?
+    let userCount: Int?
+    let version: String?
+    let features: [String]?
+    
+    enum CodingKeys: String, CodingKey {
+        case api, gateway, cdn
+        case publicApi = "public_api"
+        case web, admin, invite, captcha
+        case name, description, icon, banner
+        case publicInstance = "public_instance"
+        case userCount = "user_count"
+        case version, features
+    }
     
     struct CaptchaConfig: Decodable {
         let provider: String
