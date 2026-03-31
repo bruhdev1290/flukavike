@@ -30,7 +30,6 @@ final class HCaptchaViewController: UIViewController {
         print("[HCaptcha] baseURL: \(baseURL?.absoluteString ?? "nil")")
         print("[HCaptcha] hostDomain: \(hostDomain ?? "nil")")
         print("[HCaptcha] siteKey prefix: \(String(siteKey.prefix(8)))...")
-
         let contentController = WKUserContentController()
         contentController.add(WeakScriptMessageHandler(delegate: self), name: "hcaptchaToken")
         contentController.add(WeakScriptMessageHandler(delegate: self), name: "hcaptchaError")
@@ -298,6 +297,110 @@ struct HCaptchaSheetView: View {
             return instance
         }
         
+        return nil
+    }
+}
+
+struct HCaptchaWidgetCard: View {
+    @Environment(ThemeManager.self) private var themeManager
+    @Environment(\.colorScheme) private var colorScheme
+
+    let siteKey: String
+    let token: String?
+    let onToken: (String) -> Void
+    let onReset: () -> Void
+
+    @State private var errorMessage: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Verification")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(themeManager.textSecondary(colorScheme))
+
+                    Text(token == nil ? "Complete the hCaptcha challenge to continue." : "Verification completed.")
+                        .font(.system(size: 15))
+                        .foregroundStyle(themeManager.textPrimary(colorScheme))
+                }
+
+                Spacer()
+
+                if token != nil {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.green)
+                }
+            }
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.system(size: 14))
+                    .foregroundStyle(.red)
+            }
+
+            HCaptchaView(
+                siteKey: siteKey,
+                baseURL: captchaBaseURL(),
+                hostDomain: captchaHostDomain(),
+                onToken: { value in
+                    errorMessage = nil
+                    onToken(value)
+                },
+                onError: { error in
+                    errorMessage = "Verification failed: \(error)"
+                    onReset()
+                }
+            )
+            .frame(height: 132)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+
+            if token != nil {
+                Button("Reset verification") {
+                    errorMessage = nil
+                    onReset()
+                }
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(themeManager.accentColor.color)
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(themeManager.backgroundSecondary(colorScheme))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(themeManager.separator(colorScheme), lineWidth: 1)
+        )
+    }
+
+    private func captchaBaseURL() -> URL? {
+        let webBaseURL = APIService.shared.webBaseURL
+        if !webBaseURL.isEmpty, let url = URL(string: webBaseURL) {
+            return url
+        }
+
+        let instance = APIService.shared.currentInstance
+        if !instance.isEmpty, let url = URL(string: "https://\(instance)") {
+            return url
+        }
+
+        return nil
+    }
+
+    private func captchaHostDomain() -> String? {
+        let webBaseURL = APIService.shared.webBaseURL
+        if !webBaseURL.isEmpty, let url = URL(string: webBaseURL) {
+            return url.host
+        }
+
+        let instance = APIService.shared.currentInstance
+        if !instance.isEmpty {
+            return instance
+        }
+
         return nil
     }
 }

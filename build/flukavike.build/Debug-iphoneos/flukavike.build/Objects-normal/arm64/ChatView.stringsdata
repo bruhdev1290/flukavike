@@ -1,0 +1,48 @@
+{
+  "source": "/Users/andrew/Desktop/flukavike/flukavike/Views/Chat/ChatView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "#%@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 102
+        }
+      },
+      {
+        "comment": "",
+        "key": "Today",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 46
+        }
+      },
+      {
+        "comment": "",
+        "key": "(edited)",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 322
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 389
+        }
+      },
+      {
+        "comment": "",
+        "key": "Message #general",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 498
+        }
+      }
+    ]
+  },
+  "version": 1
+}

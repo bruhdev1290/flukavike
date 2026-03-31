@@ -191,7 +191,6 @@ struct LoginView: View {
     @State private var errorMessage: String? = nil
     @State private var showRegistration: Bool = false
     @State private var showQRCodeHelp: Bool = false
-    @State private var showCaptcha: Bool = false
     @State private var captchaToken: String? = nil
     @State private var captchaSiteKey: String = ""
     
@@ -338,6 +337,20 @@ struct LoginView: View {
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: .infinity)
                     }
+
+                    if !captchaSiteKey.isEmpty {
+                        HCaptchaWidgetCard(
+                            siteKey: captchaSiteKey,
+                            token: captchaToken,
+                            onToken: { token in
+                                captchaToken = token
+                                errorMessage = nil
+                            },
+                            onReset: {
+                                captchaToken = nil
+                            }
+                        )
+                    }
                     
                     // Sign In Button
                     Button(action: signIn) {
@@ -407,20 +420,19 @@ struct LoginView: View {
             } message: {
                 Text("Use your instance, username, and password for now.")
             }
-            .sheet(isPresented: $showCaptcha) {
-                HCaptchaSheetView(
-                    siteKey: captchaSiteKey
-                ) { token in
-                    captchaToken = token
-                    signIn()
-                }
+            .onChange(of: instance) { _, _ in
+                captchaSiteKey = ""
+                captchaToken = nil
             }
         }
     }
     
 
     private var canSignIn: Bool {
-        !instance.isEmpty && !username.isEmpty && !password.isEmpty
+        !instance.isEmpty
+            && !username.isEmpty
+            && !password.isEmpty
+            && (captchaSiteKey.isEmpty || captchaToken != nil)
     }
     
     private func signIn() {
@@ -437,7 +449,7 @@ struct LoginView: View {
                     await MainActor.run {
                         isLoading = false
                         captchaSiteKey = config.sitekey
-                        showCaptcha = true
+                        errorMessage = "Complete the hCaptcha verification to continue."
                     }
                     return
                 }
@@ -484,7 +496,7 @@ struct LoginView: View {
                             captchaSiteKey = config.sitekey
                         }
                         if !captchaSiteKey.isEmpty {
-                            showCaptcha = true
+                            errorMessage = "Complete the hCaptcha verification to continue."
                         } else {
                             errorMessage = "Captcha required but no sitekey available."
                         }
@@ -530,7 +542,6 @@ struct RegistrationView: View {
     @State private var isLoading: Bool = false
     @State private var showInstancePicker: Bool = false
     @State private var errorMessage: String? = nil
-    @State private var showCaptcha: Bool = false
     @State private var captchaToken: String? = nil
     @State private var captchaSiteKey: String = ""
     
@@ -695,6 +706,20 @@ struct RegistrationView: View {
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: .infinity)
                     }
+
+                    if !captchaSiteKey.isEmpty {
+                        HCaptchaWidgetCard(
+                            siteKey: captchaSiteKey,
+                            token: captchaToken,
+                            onToken: { token in
+                                captchaToken = token
+                                errorMessage = nil
+                            },
+                            onReset: {
+                                captchaToken = nil
+                            }
+                        )
+                    }
                     
                     Button(action: register) {
                         HStack {
@@ -731,20 +756,20 @@ struct RegistrationView: View {
                     .foregroundStyle(themeManager.textPrimary(colorScheme))
                 }
             }
-            .sheet(isPresented: $showCaptcha) {
-                HCaptchaSheetView(
-                    siteKey: captchaSiteKey
-                ) { token in
-                    captchaToken = token
-                    register()
-                }
+            .onChange(of: instance) { _, _ in
+                captchaSiteKey = ""
+                captchaToken = nil
             }
         }
     }
     
 
     private var canRegister: Bool {
-        !instance.isEmpty && !username.isEmpty && !email.isEmpty && !password.isEmpty
+        !instance.isEmpty
+            && !username.isEmpty
+            && !email.isEmpty
+            && !password.isEmpty
+            && (captchaSiteKey.isEmpty || captchaToken != nil)
     }
     
     private func register() {
@@ -761,7 +786,7 @@ struct RegistrationView: View {
                     await MainActor.run {
                         isLoading = false
                         captchaSiteKey = config.sitekey
-                        showCaptcha = true
+                        errorMessage = "Complete the hCaptcha verification to continue."
                     }
                     return
                 }
@@ -807,7 +832,7 @@ struct RegistrationView: View {
                             captchaSiteKey = config.sitekey
                         }
                         if !captchaSiteKey.isEmpty {
-                            showCaptcha = true
+                            errorMessage = "Complete the hCaptcha verification to continue."
                         } else {
                             errorMessage = "Captcha required but no sitekey available."
                         }

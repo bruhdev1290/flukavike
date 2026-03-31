@@ -1,0 +1,23 @@
+{
+  "/Users/andrew/Desktop/flukavike/flukavike/Views/Common/CommonViews.swift" : {
+    "const-values" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/CommonViews.swiftconstvalues",
+    "dependencies" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/CommonViews.d",
+    "diagnostics" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/CommonViews.dia",
+    "object" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/CommonViews.o",
+    "swift-dependencies" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/CommonViews.swiftdeps"
+  },
+  "/Users/andrew/Desktop/flukavike/flukavike/Views/Common/HCaptchaView.swift" : {
+    "const-values" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/HCaptchaView.swiftconstvalues",
+    "dependencies" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/HCaptchaView.d",
+    "diagnostics" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/HCaptchaView.dia",
+    "object" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/HCaptchaView.o",
+    "swift-dependencies" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/HCaptchaView.swiftdeps"
+  },
+  "/Users/andrew/Desktop/flukavike/flukavike/Views/Compose/ComposeView.swift" : {
+    "const-values" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/ComposeView.swiftconstvalues",
+    "dependencies" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/ComposeView.d",
+    "diagnostics" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/ComposeView.dia",
+    "object" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/ComposeView.o",
+    "swift-dependencies" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/ComposeView.swiftdeps"
+  }
+}

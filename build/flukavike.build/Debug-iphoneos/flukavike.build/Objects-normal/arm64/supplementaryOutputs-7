@@ -1,0 +1,23 @@
+{
+  "/Users/andrew/Desktop/flukavike/flukavike/Views/Main/OnboardingView.swift" : {
+    "const-values" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/OnboardingView.swiftconstvalues",
+    "dependencies" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/OnboardingView.d",
+    "diagnostics" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/OnboardingView.dia",
+    "object" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/OnboardingView.o",
+    "swift-dependencies" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/OnboardingView.swiftdeps"
+  },
+  "/Users/andrew/Desktop/flukavike/flukavike/Views/Notifications/NotificationsView.swift" : {
+    "const-values" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/NotificationsView.swiftconstvalues",
+    "dependencies" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/NotificationsView.d",
+    "diagnostics" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/NotificationsView.dia",
+    "object" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/NotificationsView.o",
+    "swift-dependencies" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/NotificationsView.swiftdeps"
+  },
+  "/Users/andrew/Desktop/flukavike/flukavike/Views/Profile/ProfileView.swift" : {
+    "const-values" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/ProfileView.swiftconstvalues",
+    "dependencies" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/ProfileView.d",
+    "diagnostics" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/ProfileView.dia",
+    "object" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/ProfileView.o",
+    "swift-dependencies" : "/Users/andrew/Desktop/flukavike/build/flukavike.build/Debug-iphoneos/flukavike.build/Objects-normal/arm64/ProfileView.swiftdeps"
+  }
+}

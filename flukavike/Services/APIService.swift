@@ -8,6 +8,7 @@ import Foundation
 @Observable
 class APIService {
     static let shared = APIService()
+    static let fallbackHCaptchaSiteKey = "9cbad400-df84-4e0c-bda6-e65000be78aa"
     
     private var authToken: String?
     private(set) var currentInstance: String = ""
@@ -134,7 +135,60 @@ class APIService {
         self.gatewayURL = config.gateway
         self.cdnURL = config.cdn ?? ""
         self.webBaseURL = config.web?.trimmingCharacters(in: CharacterSet(charactersIn: "/")) ?? "https://\(currentInstance)"
-        self.captchaConfig = config.captcha
+        if let configCaptcha = config.captcha {
+            self.captchaConfig = InstanceConfig.CaptchaConfig(
+                provider: configCaptcha.provider,
+                sitekey: sanitizedCaptchaSiteKey(configCaptcha.sitekey) ?? Self.fallbackHCaptchaSiteKey
+            )
+        } else {
+            self.captchaConfig = nil
+        }
+    }
+
+    private func captchaDetails(from json: [String: Any]?) -> (sitekey: String?, service: String?) {
+        guard let json else {
+            return (nil, nil)
+        }
+
+        let nestedCaptcha = json["captcha"] as? [String: Any]
+
+        let sitekey = [
+            json["captcha_sitekey"],
+            json["captcha_site_key"],
+            json["sitekey"],
+            json["site_key"],
+            nestedCaptcha?["sitekey"],
+            nestedCaptcha?["site_key"],
+            nestedCaptcha?["key"]
+        ]
+            .compactMap { $0 as? String }
+            .first { !$0.isEmpty }
+
+        let service = [
+            json["captcha_service"],
+            json["captcha_provider"],
+            json["service"],
+            json["provider"],
+            nestedCaptcha?["service"],
+            nestedCaptcha?["provider"]
+        ]
+            .compactMap { $0 as? String }
+            .first { !$0.isEmpty }
+
+        return (sitekey, service)
+    }
+
+    private func sanitizedCaptchaSiteKey(_ value: String?) -> String? {
+        guard let value else {
+            return nil
+        }
+
+        let filteredScalars = value.unicodeScalars.filter { scalar in
+            !CharacterSet.controlCharacters.contains(scalar) &&
+            !CharacterSet.whitespacesAndNewlines.contains(scalar)
+        }
+        let sanitized = String(String.UnicodeScalarView(filteredScalars))
+        return sanitized.isEmpty ? nil : sanitized
     }
     
     // MARK: - Authentication
@@ -239,8 +293,11 @@ class APIService {
             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             let code = json?["code"] as? String
             if code == "CAPTCHA_REQUIRED" || code == "captcha-required" {
-                let sitekey = json?["captcha_sitekey"] as? String
-                let service = json?["captcha_service"] as? String
+                let details = captchaDetails(from: json)
+                let sitekey = sanitizedCaptchaSiteKey(details.sitekey)
+                    ?? sanitizedCaptchaSiteKey(captchaConfig?.sitekey)
+                    ?? Self.fallbackHCaptchaSiteKey
+                let service = details.service ?? captchaConfig?.provider
                 throw APIError.captchaRequired(sitekey: sitekey, service: service)
             }
             let errorBody = String(data: data, encoding: .utf8) ?? "no body"
@@ -467,7 +524,7 @@ class APIService {
 
 // MARK: - Instance Discovery Model
 
-struct InstanceConfig: Codable {
+struct InstanceConfig: Decodable {
     let api: String
     let gateway: String
     let cdn: String?
@@ -477,9 +534,37 @@ struct InstanceConfig: Codable {
     let invite: String?
     let captcha: CaptchaConfig?
     
-    struct CaptchaConfig: Codable {
+    struct CaptchaConfig: Decodable {
         let provider: String
         let sitekey: String
+
+        private enum CodingKeys: String, CodingKey {
+            case provider
+            case service
+            case sitekey
+            case siteKey
+            case site_key
+            case key
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+
+            provider = try container.decodeIfPresent(String.self, forKey: .provider)
+                ?? container.decodeIfPresent(String.self, forKey: .service)
+                ?? "hcaptcha"
+
+            sitekey = try container.decodeIfPresent(String.self, forKey: .sitekey)
+                ?? container.decodeIfPresent(String.self, forKey: .siteKey)
+                ?? container.decodeIfPresent(String.self, forKey: .site_key)
+                ?? container.decodeIfPresent(String.self, forKey: .key)
+                ?? ""
+        }
+
+        init(provider: String, sitekey: String) {
+            self.provider = provider
+            self.sitekey = sitekey
+        }
     }
 }
 
