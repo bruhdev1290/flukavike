@@ -473,16 +473,35 @@ struct LoginView: View {
             } catch let error as APIError {
                 await MainActor.run {
                     isLoading = false
-                    captchaToken = nil
                     let normalizedInstance = APIService.normalizeInstance(instance)
                     switch error {
+                    case .captchaRequired(let sitekey, _):
+                        // Server requires captcha — show the challenge
+                        captchaToken = nil
+                        if let sitekey, !sitekey.isEmpty {
+                            captchaSiteKey = sitekey
+                        } else if let config = APIService.shared.captchaConfig {
+                            captchaSiteKey = config.sitekey
+                        }
+                        if !captchaSiteKey.isEmpty {
+                            showCaptcha = true
+                        } else {
+                            errorMessage = "Captcha required but no sitekey available."
+                        }
                     case .unauthorized:
+                        captchaToken = nil
                         errorMessage = "Invalid username or password"
                     case .invalidURL:
+                        captchaToken = nil
                         errorMessage = "Could not connect to \(instance). Check the instance URL."
                     case .forbidden(let message):
+                        captchaToken = nil
                         errorMessage = message ?? "Connection forbidden by \(normalizedInstance)."
+                    case .serverError(_, let message):
+                        captchaToken = nil
+                        errorMessage = message ?? "Server error. Please try again."
                     default:
+                        captchaToken = nil
                         errorMessage = "Connection failed: \(error)"
                     }
                 }
@@ -779,13 +798,27 @@ struct RegistrationView: View {
             } catch let error as APIError {
                 await MainActor.run {
                     isLoading = false
-                    captchaToken = nil
                     switch error {
+                    case .captchaRequired(let sitekey, _):
+                        captchaToken = nil
+                        if let sitekey, !sitekey.isEmpty {
+                            captchaSiteKey = sitekey
+                        } else if let config = APIService.shared.captchaConfig {
+                            captchaSiteKey = config.sitekey
+                        }
+                        if !captchaSiteKey.isEmpty {
+                            showCaptcha = true
+                        } else {
+                            errorMessage = "Captcha required but no sitekey available."
+                        }
                     case .invalidURL:
+                        captchaToken = nil
                         errorMessage = "Could not connect to \(instance). Check the instance URL."
                     case .forbidden(let message):
+                        captchaToken = nil
                         errorMessage = message ?? "Registration forbidden. Please try again."
                     default:
+                        captchaToken = nil
                         errorMessage = "Could not create your account: \(error)"
                     }
                 }

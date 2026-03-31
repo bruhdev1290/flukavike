@@ -7,7 +7,10 @@
 	objects = {
 
 /* Begin PBXFileReference section */
+		30004B430FFA8FBCF6CBF24E /* Pods-flukavike.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-flukavike.release.xcconfig"; path = "Target Support Files/Pods-flukavike/Pods-flukavike.release.xcconfig"; sourceTree = "<group>"; };
 		490DADBE2F7AB4FB005C1B5A /* flukavike.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = flukavike.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		863A752A126F0D5FE3956920 /* Pods_flukavike.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_flukavike.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		C359D75D1B2476E775C6BFC7 /* Pods-flukavike.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-flukavike.debug.xcconfig"; path = "Target Support Files/Pods-flukavike/Pods-flukavike.debug.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -36,7 +39,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				490DAED12F7AC500005C1B5A /* HCaptcha in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -48,6 +50,8 @@
 			children = (
 				490DADC02F7AB4FB005C1B5A /* flukavike */,
 				490DADBF2F7AB4FB005C1B5A /* Products */,
+				9138905272CFB6F48FE819CA /* Pods */,
+				FEC9419D576B75F85AFC27BB /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -57,6 +61,23 @@
 				490DADBE2F7AB4FB005C1B5A /* flukavike.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		9138905272CFB6F48FE819CA /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				C359D75D1B2476E775C6BFC7 /* Pods-flukavike.debug.xcconfig */,
+				30004B430FFA8FBCF6CBF24E /* Pods-flukavike.release.xcconfig */,
+			);
+			path = Pods;
+			sourceTree = "<group>";
+		};
+		FEC9419D576B75F85AFC27BB /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				863A752A126F0D5FE3956920 /* Pods_flukavike.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -78,9 +99,6 @@
 				490DADC02F7AB4FB005C1B5A /* flukavike */,
 			);
 			name = flukavike;
-			packageProductDependencies = (
-				490DAED02F7AC500005C1B5A /* HCaptcha */,
-			);
 			productName = flukavike;
 			productReference = 490DADBE2F7AB4FB005C1B5A /* flukavike.app */;
 			productType = "com.apple.product-type.application";
@@ -109,9 +127,6 @@
 			);
 			mainGroup = 490DADB52F7AB4FB005C1B5A;
 			minimizedProjectReferenceProxies = 1;
-			packageReferences = (
-				490DAECF2F7AC500005C1B5A /* XCRemoteSwiftPackageReference "HCaptcha-ios-sdk" */,
-			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 490DADBF2F7AB4FB005C1B5A /* Products */;
 			projectDirPath = "";
@@ -261,6 +276,7 @@
 		};
 		490DADCA2F7AB4FC005C1B5A /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = C359D75D1B2476E775C6BFC7 /* Pods-flukavike.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -299,6 +315,7 @@
 		};
 		490DADCB2F7AB4FC005C1B5A /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 30004B430FFA8FBCF6CBF24E /* Pods-flukavike.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -358,25 +375,5 @@
 		};
 /* End XCConfigurationList section */
 	};
-
-/* Begin PBXPackageDependency section */
-		490DAED02F7AC500005C1B5A /* HCaptcha */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 490DAECF2F7AC500005C1B5A /* XCRemoteSwiftPackageReference "HCaptcha-ios-sdk" */;
-			productName = HCaptcha;
-		};
-/* End PBXPackageDependency section */
-
-/* Begin XCRemoteSwiftPackageReference section */
-		490DAECF2F7AC500005C1B5A /* XCRemoteSwiftPackageReference "HCaptcha-ios-sdk" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/hCaptcha/HCaptcha-ios-sdk";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 2.8.0;
-			};
-		};
-/* End XCRemoteSwiftPackageReference section */
-
 	rootObject = 490DADB62F7AB4FB005C1B5A /* Project object */;
 }

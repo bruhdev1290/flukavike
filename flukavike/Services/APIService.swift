@@ -211,6 +211,13 @@ class APIService {
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         
+        // Set Origin header to match the web frontend (required by Fluxer API)
+        if !webBaseURL.isEmpty {
+            request.setValue(webBaseURL, forHTTPHeaderField: "Origin")
+        } else if !currentInstance.isEmpty {
+            request.setValue("https://\(currentInstance)", forHTTPHeaderField: "Origin")
+        }
+        
         if let token = authToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
@@ -228,6 +235,18 @@ class APIService {
         switch httpResponse.statusCode {
         case 200...299:
             return data
+        case 400:
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let code = json?["code"] as? String
+            if code == "CAPTCHA_REQUIRED" || code == "captcha-required" {
+                let sitekey = json?["captcha_sitekey"] as? String
+                let service = json?["captcha_service"] as? String
+                throw APIError.captchaRequired(sitekey: sitekey, service: service)
+            }
+            let errorBody = String(data: data, encoding: .utf8) ?? "no body"
+            print("[API] Error 400: \(errorBody)")
+            let message = json?["message"] as? String
+            throw APIError.serverError(statusCode: 400, message: message)
         case 401:
             throw APIError.unauthorized
         case 403:
@@ -238,7 +257,10 @@ class APIService {
         case 429:
             throw APIError.rateLimited
         default:
-            throw APIError.serverError(statusCode: httpResponse.statusCode)
+            let errorBody = String(data: data, encoding: .utf8) ?? "no body"
+            print("[API] Error \(httpResponse.statusCode): \(errorBody)")
+            let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["message"] as? String
+            throw APIError.serverError(statusCode: httpResponse.statusCode, message: message)
         }
     }
     
@@ -304,6 +326,12 @@ class APIService {
         var request = URLRequest(url: URL(string: "\(baseURL)/channels/\(channelId)/messages")!)
         request.httpMethod = "POST"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        
+        if !webBaseURL.isEmpty {
+            request.setValue(webBaseURL, forHTTPHeaderField: "Origin")
+        } else if !currentInstance.isEmpty {
+            request.setValue("https://\(currentInstance)", forHTTPHeaderField: "Origin")
+        }
         
         if let token = authToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -464,7 +492,8 @@ enum APIError: Error {
     case forbidden(message: String?)
     case notFound
     case rateLimited
-    case serverError(statusCode: Int)
+    case captchaRequired(sitekey: String?, service: String?)
+    case serverError(statusCode: Int, message: String? = nil)
     case decodingError(Error)
     case discoveryFailed
 }

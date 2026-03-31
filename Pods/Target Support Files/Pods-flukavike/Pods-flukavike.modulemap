@@ -1,0 +1,6 @@
+framework module Pods_flukavike {
+  umbrella header "Pods-flukavike-umbrella.h"
+
+  export *
+  module * { export * }
+}
