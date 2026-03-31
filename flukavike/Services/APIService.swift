@@ -1,6 +1,6 @@
 //
 //  APIService.swift
-//  Fluxer HTTP API client
+//  Flukavike HTTP API client
 //
 
 import Foundation
@@ -10,11 +10,18 @@ class APIService {
     static let shared = APIService()
     
     private var authToken: String?
-    private var currentInstance: String = "fluxer.app"
+    private(set) var currentInstance: String = ""
     
-    private var baseURL: String {
-        "https://\(currentInstance)/api/v1"
-    }
+    // Discovered endpoints (populated by discoverInstance or set manually)
+    private(set) var apiBaseURL: String = ""
+    private(set) var gatewayURL: String = ""
+    private(set) var cdnURL: String = ""
+    private(set) var webBaseURL: String = ""
+    private(set) var captchaConfig: InstanceConfig.CaptchaConfig?
+    
+    var captchaRequired: Bool { captchaConfig != nil }
+    
+    private var baseURL: String { apiBaseURL }
     
     private var urlSession: URLSession {
         let config = URLSessionConfiguration.default
@@ -30,49 +37,158 @@ class APIService {
     }
     
     func setInstance(_ instance: String) {
-        self.currentInstance = instance
+        let normalized = Self.normalizeInstance(instance)
+        self.currentInstance = normalized
+        // Default API URL until discovery overrides it
+        self.apiBaseURL = "https://\(normalized)/api"
+        self.webBaseURL = "https://\(normalized)"
     }
     
-    func login(instance: String, username: String, password: String) async throws -> LoginResponse {
-        setInstance(instance)
-        let body = [
+    /// Normalizes an instance string by stripping protocol, path, and trailing slashes.
+    static func normalizeInstance(_ instance: String) -> String {
+        var normalized = instance
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        
+        // Strip protocol
+        if normalized.hasPrefix("https://") {
+            normalized = String(normalized.dropFirst("https://".count))
+        } else if normalized.hasPrefix("http://") {
+            normalized = String(normalized.dropFirst("http://".count))
+        }
+        
+        // Strip path and trailing slashes
+        if let slashIndex = normalized.firstIndex(of: "/") {
+            normalized = String(normalized[normalized.startIndex..<slashIndex])
+        }
+        
+        return normalized
+    }
+    
+    /// Extracts the base domain from an instance (e.g., "web.fluxer.app" → "fluxer.app")
+    private static func baseDomain(of instance: String) -> String? {
+        let parts = instance.split(separator: ".")
+        guard parts.count > 2 else { return nil }
+        return parts.dropFirst().joined(separator: ".")
+    }
+    
+    // MARK: - Instance Discovery
+    
+    /// Discovers API endpoints from the instance's /.well-known/fluxer document.
+    /// Tries the instance domain first, then falls back to api.{baseDomain}.
+    func discoverInstance(_ instance: String) async throws {
+        let normalized = Self.normalizeInstance(instance)
+        self.currentInstance = normalized
+        
+        // Try discovery at the entered domain first
+        if let config = try? await fetchWellKnown(host: normalized) {
+            applyConfig(config)
+            return
+        }
+        
+        // If the domain has a subdomain (e.g., web.fluxer.app), try api.{baseDomain}
+        if let base = Self.baseDomain(of: normalized) {
+            if let config = try? await fetchWellKnown(host: "api.\(base)") {
+                applyConfig(config)
+                return
+            }
+            
+            // Also try the bare base domain
+            if let config = try? await fetchWellKnown(host: base) {
+                applyConfig(config)
+                return
+            }
+        }
+        
+        // Fallback: assume standard layout
+        self.apiBaseURL = "https://\(normalized)/api"
+        self.gatewayURL = ""
+        self.cdnURL = ""
+        self.webBaseURL = "https://\(normalized)"
+        self.captchaConfig = nil
+    }
+    
+    private func fetchWellKnown(host: String) async throws -> InstanceConfig {
+        guard let url = URL(string: "https://\(host)/.well-known/fluxer") else {
+            throw APIError.invalidURL
+        }
+        
+        let (data, response) = try await urlSession.data(from: url)
+        
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            throw APIError.invalidResponse
+        }
+        
+        // Make sure we got JSON, not an HTML/JS SPA page
+        if let contentType = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type"),
+           contentType.contains("text/html") {
+            throw APIError.invalidResponse
+        }
+        
+        return try JSONDecoder.flukavike.decode(InstanceConfig.self, from: data)
+    }
+    
+    private func applyConfig(_ config: InstanceConfig) {
+        self.apiBaseURL = config.api.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        self.gatewayURL = config.gateway
+        self.cdnURL = config.cdn ?? ""
+        self.webBaseURL = config.web?.trimmingCharacters(in: CharacterSet(charactersIn: "/")) ?? "https://\(currentInstance)"
+        self.captchaConfig = config.captcha
+    }
+    
+    // MARK: - Authentication
+    
+    func login(instance: String, username: String, password: String, captchaKey: String? = nil) async throws -> LoginResponse {
+        // Run discovery before login to find the correct API URL
+        try await discoverInstance(instance)
+        
+        var body = [
             "username": username,
             "password": password
         ]
-        let bodyData = try JSONEncoder.fluxer.encode(body)
+        if let captchaKey {
+            body["captcha_key"] = captchaKey
+        }
+        let bodyData = try JSONEncoder.flukavike.encode(body)
         let data = try await makeRequest(
             endpoint: "/auth/login",
             method: "POST",
             body: bodyData
         )
-        return try JSONDecoder.fluxer.decode(LoginResponse.self, from: data)
+        return try JSONDecoder.flukavike.decode(LoginResponse.self, from: data)
     }
     
-    func register(instance: String, username: String, email: String, password: String) async throws -> LoginResponse {
-        setInstance(instance)
-        let body = [
+    func register(instance: String, username: String, email: String, password: String, captchaKey: String? = nil) async throws -> LoginResponse {
+        // Run discovery before registration
+        try await discoverInstance(instance)
+        
+        var body = [
             "username": username,
             "email": email,
             "password": password
         ]
-        let bodyData = try JSONEncoder.fluxer.encode(body)
+        if let captchaKey {
+            body["captcha_key"] = captchaKey
+        }
+        let bodyData = try JSONEncoder.flukavike.encode(body)
         let data = try await makeRequest(
             endpoint: "/auth/register",
             method: "POST",
             body: bodyData
         )
-        return try JSONDecoder.fluxer.decode(LoginResponse.self, from: data)
+        return try JSONDecoder.flukavike.decode(LoginResponse.self, from: data)
     }
     
     func refreshToken(refreshToken: String) async throws -> RefreshResponse {
         let body = ["refresh_token": refreshToken]
-        let bodyData = try JSONEncoder.fluxer.encode(body)
+        let bodyData = try JSONEncoder.flukavike.encode(body)
         let data = try await makeRequest(
             endpoint: "/auth/refresh",
             method: "POST",
             body: bodyData
         )
-        return try JSONDecoder.fluxer.decode(RefreshResponse.self, from: data)
+        return try JSONDecoder.flukavike.decode(RefreshResponse.self, from: data)
     }
     
     func logout() async throws {
@@ -115,7 +231,8 @@ class APIService {
         case 401:
             throw APIError.unauthorized
         case 403:
-            throw APIError.forbidden
+            let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["message"] as? String
+            throw APIError.forbidden(message: message)
         case 404:
             throw APIError.notFound
         case 429:
@@ -129,31 +246,31 @@ class APIService {
     
     func getCurrentUser() async throws -> User {
         let data = try await makeRequest(endpoint: "/users/@me")
-        return try JSONDecoder.fluxer.decode(User.self, from: data)
+        return try JSONDecoder.flukavike.decode(User.self, from: data)
     }
     
     func getUserGuilds() async throws -> [Server] {
         let data = try await makeRequest(endpoint: "/users/@me/guilds")
-        return try JSONDecoder.fluxer.decode([Server].self, from: data)
+        return try JSONDecoder.flukavike.decode([Server].self, from: data)
     }
     
     // MARK: - Guild Endpoints
     
     func getGuild(id: String) async throws -> Server {
         let data = try await makeRequest(endpoint: "/guilds/\(id)")
-        return try JSONDecoder.fluxer.decode(Server.self, from: data)
+        return try JSONDecoder.flukavike.decode(Server.self, from: data)
     }
     
     func getGuildChannels(guildId: String) async throws -> [Channel] {
         let data = try await makeRequest(endpoint: "/guilds/\(guildId)/channels")
-        return try JSONDecoder.fluxer.decode([Channel].self, from: data)
+        return try JSONDecoder.flukavike.decode([Channel].self, from: data)
     }
     
     // MARK: - Channel Endpoints
     
     func getChannel(id: String) async throws -> Channel {
         let data = try await makeRequest(endpoint: "/channels/\(id)")
-        return try JSONDecoder.fluxer.decode(Channel.self, from: data)
+        return try JSONDecoder.flukavike.decode(Channel.self, from: data)
     }
     
     func getMessages(channelId: String, before: String? = nil, limit: Int = 50) async throws -> [Message] {
@@ -162,7 +279,7 @@ class APIService {
             endpoint += "&before=\(before)"
         }
         let data = try await makeRequest(endpoint: endpoint)
-        return try JSONDecoder.fluxer.decode([Message].self, from: data)
+        return try JSONDecoder.flukavike.decode([Message].self, from: data)
     }
     
     func sendMessage(channelId: String, content: String) async throws -> Message {
@@ -173,7 +290,7 @@ class APIService {
             method: "POST",
             body: bodyData
         )
-        return try JSONDecoder.fluxer.decode(Message.self, from: data)
+        return try JSONDecoder.flukavike.decode(Message.self, from: data)
     }
     
     func sendVoiceMessage(
@@ -227,7 +344,7 @@ class APIService {
         
         switch httpResponse.statusCode {
         case 200...299:
-            return try JSONDecoder.fluxer.decode(Message.self, from: data)
+            return try JSONDecoder.flukavike.decode(Message.self, from: data)
         case 401:
             throw APIError.unauthorized
         default:
@@ -237,7 +354,7 @@ class APIService {
     
     // MARK: - Call Endpoints
     
-    func createCall(channelId: String, type: FluxerCall.CallType) async throws -> FluxerCall {
+    func createCall(channelId: String, type: FlukavikeCall.CallType) async throws -> FlukavikeCall {
         let body = ["type": type.rawValue]
         let bodyData = try JSONEncoder().encode(body)
         let data = try await makeRequest(
@@ -245,7 +362,7 @@ class APIService {
             method: "POST",
             body: bodyData
         )
-        return try JSONDecoder.fluxer.decode(FluxerCall.self, from: data)
+        return try JSONDecoder.flukavike.decode(FlukavikeCall.self, from: data)
     }
     
     func acceptCall(callId: String) async throws {
@@ -293,7 +410,7 @@ class APIService {
     
     func getVoiceToken(channelId: String) async throws -> VoiceTokenResponse {
         let data = try await makeRequest(endpoint: "/channels/\(channelId)/voice-token")
-        return try JSONDecoder.fluxer.decode(VoiceTokenResponse.self, from: data)
+        return try JSONDecoder.flukavike.decode(VoiceTokenResponse.self, from: data)
     }
     
     // MARK: - Notification Endpoints
@@ -320,23 +437,42 @@ class APIService {
     }
 }
 
+// MARK: - Instance Discovery Model
+
+struct InstanceConfig: Codable {
+    let api: String
+    let gateway: String
+    let cdn: String?
+    let publicApi: String?
+    let web: String?
+    let admin: String?
+    let invite: String?
+    let captcha: CaptchaConfig?
+    
+    struct CaptchaConfig: Codable {
+        let provider: String
+        let sitekey: String
+    }
+}
+
 // MARK: - Errors
 
 enum APIError: Error {
     case invalidURL
     case invalidResponse
     case unauthorized
-    case forbidden
+    case forbidden(message: String?)
     case notFound
     case rateLimited
     case serverError(statusCode: Int)
     case decodingError(Error)
+    case discoveryFailed
 }
 
 // MARK: - JSON Decoder Extension
 
 extension JSONDecoder {
-    static var fluxer: JSONDecoder {
+    static var flukavike: JSONDecoder {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         decoder.keyDecodingStrategy = .convertFromSnakeCase
@@ -345,7 +481,7 @@ extension JSONDecoder {
 }
 
 extension JSONEncoder {
-    static var fluxer: JSONEncoder {
+    static var flukavike: JSONEncoder {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.keyEncodingStrategy = .convertToSnakeCase

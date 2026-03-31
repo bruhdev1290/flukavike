@@ -1,6 +1,6 @@
 //
 //  CallView.swift
-//  Active call interface using Fluxer API
+//  Active call interface using Flukavike API
 //
 
 import SwiftUI
@@ -8,7 +8,7 @@ import SwiftUI
 struct CallView: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(\.colorScheme) private var colorScheme
-    @State private var callService = FluxerCallService.shared
+    @State private var callService = FlukavikeCallService.shared
     @State private var timer: Timer?
     
     var body: some View {
@@ -293,7 +293,7 @@ struct ControlButton: View {
 struct IncomingCallView: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(\.colorScheme) private var colorScheme
-    @State private var callService = FluxerCallService.shared
+    @State private var callService = FlukavikeCallService.shared
     
     var body: some View {
         ZStack {

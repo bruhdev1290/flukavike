@@ -16,7 +16,7 @@ struct OnboardingView: View {
     let pages: [OnboardingPage] = [
         OnboardingPage(
             icon: "hexagon.fill",
-            title: "Welcome to Fluxer",
+            title: "Welcome to Flukavike",
             description: "A modern, open-source platform for communities. Self-hostable, customizable, and built for the future."
         ),
         OnboardingPage(
@@ -191,8 +191,12 @@ struct LoginView: View {
     @State private var errorMessage: String? = nil
     @State private var showRegistration: Bool = false
     @State private var showQRCodeHelp: Bool = false
+    @State private var showCaptcha: Bool = false
+    @State private var captchaToken: String? = nil
+    @State private var captchaSiteKey: String = ""
     
     let popularInstances = [
+        "web.fluxer.app",
         "fluxer.app",
         "chat.privacy.dev",
         "community.open",
@@ -215,7 +219,7 @@ struct LoginView: View {
                                 .foregroundStyle(themeManager.accentColor.color)
                         }
                         
-                        Text("Sign in to Fluxer")
+                        Text("Sign in to Flukavike")
                             .font(.system(size: 24, weight: .bold))
                             .foregroundStyle(themeManager.textPrimary(colorScheme))
                     }
@@ -403,7 +407,29 @@ struct LoginView: View {
             } message: {
                 Text("Use your instance, username, and password for now.")
             }
+            .sheet(isPresented: $showCaptcha) {
+                HCaptchaSheetView(
+                    siteKey: captchaSiteKey,
+                    hostURL: Self.captchaHostURL()
+                ) { token in
+                    captchaToken = token
+                    signIn()
+                }
+            }
         }
+    }
+    
+    /// Uses the discovered web origin for the captcha host.
+    /// hCaptcha sitekeys are usually registered against the public web app host,
+    /// not the API subdomain.
+    private static func captchaHostURL() -> URL {
+        if let url = URL(string: APIService.shared.webBaseURL) {
+            return url
+        }
+        if let url = URL(string: "https://\(APIService.shared.currentInstance)") {
+            return url
+        }
+        return URL(string: "https://fluxer.app")!
     }
     
     private var canSignIn: Bool {
@@ -416,19 +442,38 @@ struct LoginView: View {
         
         Task {
             do {
+                // Discover instance to check for captcha requirement
+                try await APIService.shared.discoverInstance(instance)
+                
+                // If captcha is required and we don't have a token yet, show the challenge
+                if let config = APIService.shared.captchaConfig, captchaToken == nil {
+                    await MainActor.run {
+                        isLoading = false
+                        captchaSiteKey = config.sitekey
+                        showCaptcha = true
+                    }
+                    return
+                }
+                
                 let response = try await AuthService.shared.login(
                     instance: instance,
                     username: username,
-                    password: password
+                    password: password,
+                    captchaKey: captchaToken
                 )
                 
                 await MainActor.run {
                     isLoading = false
+                    captchaToken = nil
                     appState.currentUser = response.user
                     dismiss()
                 }
                 
-                // Connect WebSocket after successful login
+                // Set gateway URL from discovery, then connect WebSocket
+                let discoveredGateway = APIService.shared.gatewayURL
+                if !discoveredGateway.isEmpty {
+                    WebSocketService.shared.setGatewayURL(discoveredGateway)
+                }
                 WebSocketService.shared.connect(token: response.token)
                 
                 // Register for push notifications
@@ -441,11 +486,15 @@ struct LoginView: View {
             } catch let error as APIError {
                 await MainActor.run {
                     isLoading = false
+                    captchaToken = nil
+                    let normalizedInstance = APIService.normalizeInstance(instance)
                     switch error {
                     case .unauthorized:
                         errorMessage = "Invalid username or password"
                     case .invalidURL:
                         errorMessage = "Could not connect to \(instance). Check the instance URL."
+                    case .forbidden(let message):
+                        errorMessage = message ?? "Connection forbidden by \(normalizedInstance)."
                     default:
                         errorMessage = "Connection failed: \(error)"
                     }
@@ -453,6 +502,7 @@ struct LoginView: View {
             } catch {
                 await MainActor.run {
                     isLoading = false
+                    captchaToken = nil
                     errorMessage = "Could not connect to \(instance). Check the instance URL."
                 }
             }
@@ -474,10 +524,14 @@ struct RegistrationView: View {
     @State private var isLoading: Bool = false
     @State private var showInstancePicker: Bool = false
     @State private var errorMessage: String? = nil
+    @State private var showCaptcha: Bool = false
+    @State private var captchaToken: String? = nil
+    @State private var captchaSiteKey: String = ""
     
     let onAuthenticated: () -> Void
     
     private let popularInstances = [
+        "web.fluxer.app",
         "fluxer.app",
         "chat.privacy.dev",
         "community.open",
@@ -499,7 +553,7 @@ struct RegistrationView: View {
                                 .foregroundStyle(themeManager.accentColor.color)
                         }
                         
-                        Text("Create your Fluxer account")
+                        Text("Create your Flukavike account")
                             .font(.system(size: 24, weight: .bold))
                             .foregroundStyle(themeManager.textPrimary(colorScheme))
                             .multilineTextAlignment(.center)
@@ -671,7 +725,26 @@ struct RegistrationView: View {
                     .foregroundStyle(themeManager.textPrimary(colorScheme))
                 }
             }
+            .sheet(isPresented: $showCaptcha) {
+                HCaptchaSheetView(
+                    siteKey: captchaSiteKey,
+                    hostURL: Self.captchaHostURL()
+                ) { token in
+                    captchaToken = token
+                    register()
+                }
+            }
         }
+    }
+    
+    private static func captchaHostURL() -> URL {
+        if let url = URL(string: APIService.shared.webBaseURL) {
+            return url
+        }
+        if let url = URL(string: "https://\(APIService.shared.currentInstance)") {
+            return url
+        }
+        return URL(string: "https://fluxer.app")!
     }
     
     private var canRegister: Bool {
@@ -684,20 +757,40 @@ struct RegistrationView: View {
         
         Task {
             do {
+                // Discover instance to check for captcha requirement
+                try await APIService.shared.discoverInstance(instance)
+                
+                // If captcha is required and we don't have a token yet, show the challenge
+                if let config = APIService.shared.captchaConfig, captchaToken == nil {
+                    await MainActor.run {
+                        isLoading = false
+                        captchaSiteKey = config.sitekey
+                        showCaptcha = true
+                    }
+                    return
+                }
+                
                 let response = try await AuthService.shared.register(
                     instance: instance,
                     username: username,
                     email: email,
-                    password: password
+                    password: password,
+                    captchaKey: captchaToken
                 )
                 
                 await MainActor.run {
                     isLoading = false
+                    captchaToken = nil
                     appState.currentUser = response.user
                     dismiss()
                     onAuthenticated()
                 }
                 
+                // Set gateway URL from discovery, then connect WebSocket
+                let discoveredGateway = APIService.shared.gatewayURL
+                if !discoveredGateway.isEmpty {
+                    WebSocketService.shared.setGatewayURL(discoveredGateway)
+                }
                 WebSocketService.shared.connect(token: response.token)
                 
                 if let deviceToken = PushNotificationService.shared.deviceToken {
@@ -709,9 +802,12 @@ struct RegistrationView: View {
             } catch let error as APIError {
                 await MainActor.run {
                     isLoading = false
+                    captchaToken = nil
                     switch error {
                     case .invalidURL:
                         errorMessage = "Could not connect to \(instance). Check the instance URL."
+                    case .forbidden(let message):
+                        errorMessage = message ?? "Registration forbidden. Please try again."
                     default:
                         errorMessage = "Could not create your account: \(error)"
                     }
@@ -719,6 +815,7 @@ struct RegistrationView: View {
             } catch {
                 await MainActor.run {
                     isLoading = false
+                    captchaToken = nil
                     errorMessage = "Could not create your account. Please try again."
                 }
             }

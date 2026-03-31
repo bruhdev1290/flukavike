@@ -14,7 +14,7 @@ struct FluxerApp: App {
     // Services
     @State private var apiService = APIService.shared
     @State private var webSocketService = WebSocketService.shared
-    @State private var callService = FluxerCallService.shared
+    @State private var callService = FlukavikeCallService.shared
     @State private var pushService = PushNotificationService.shared
     
     // State
@@ -152,7 +152,7 @@ struct FluxerApp: App {
         // Incoming call from push notification
         pushService.onIncomingCall = { notification in
             // Convert to FluxerCall and handle
-            let call = FluxerCall(
+            let call = FlukavikeCall(
                 id: notification.id,
                 channelId: notification.channelId,
                 guildId: notification.guildId,

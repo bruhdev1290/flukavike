@@ -1,6 +1,6 @@
 //
 //  AuthService.swift
-//  Authentication service for Fluxer
+//  Authentication service for Flukavike
 //
 
 import Foundation
@@ -45,11 +45,12 @@ class AuthService {
     
     // MARK: - Login
     
-    func login(instance: String, username: String, password: String) async throws -> LoginResponse {
+    func login(instance: String, username: String, password: String, captchaKey: String? = nil) async throws -> LoginResponse {
         let response = try await APIService.shared.login(
             instance: instance,
             username: username,
-            password: password
+            password: password,
+            captchaKey: captchaKey
         )
         
         await MainActor.run {
@@ -62,12 +63,13 @@ class AuthService {
     
     // MARK: - Register
     
-    func register(instance: String, username: String, email: String, password: String) async throws -> LoginResponse {
+    func register(instance: String, username: String, email: String, password: String, captchaKey: String? = nil) async throws -> LoginResponse {
         let response = try await APIService.shared.register(
             instance: instance,
             username: username,
             email: email,
-            password: password
+            password: password,
+            captchaKey: captchaKey
         )
         
         await MainActor.run {

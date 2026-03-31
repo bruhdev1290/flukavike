@@ -1,6 +1,6 @@
 //
 //  VoiceChannelView.swift
-//  Voice channel using Fluxer API
+//  Voice channel using Flukavike API
 //
 
 import SwiftUI
@@ -11,7 +11,7 @@ struct VoiceChannelView: View {
     @Environment(\.dismiss) private var dismiss
     
     let channel: Channel
-    @State private var callService = FluxerCallService.shared
+    @State private var callService = FlukavikeCallService.shared
     @State private var participants: [VoiceParticipant] = []
     @State private var isConnecting = false
     

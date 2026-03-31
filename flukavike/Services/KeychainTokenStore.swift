@@ -7,7 +7,7 @@ import Foundation
 import Security
 
 enum KeychainTokenStore {
-    private static let service = "app.fluxer.mobile"
+    private static let service = "app.flukavike.mobile"
     private static let tokenKey = "auth_token"
     private static let refreshTokenKey = "refresh_token"
     

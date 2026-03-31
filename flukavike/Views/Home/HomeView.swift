@@ -30,7 +30,7 @@ struct HomeView: View {
                 .padding(.vertical, 16)
             }
             .background(themeManager.backgroundPrimary(colorScheme))
-            .navigationTitle("Fluxer")
+            .navigationTitle("Flukavike")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -91,7 +91,7 @@ struct HomeView: View {
             VStack(spacing: 0) {
                 PinnedChannelRow(
                     channel: Channel.previewChannels[0],
-                    serverName: "Fluxer HQ"
+                    serverName: "Flukavike HQ"
                 )
                 
                 Divider()

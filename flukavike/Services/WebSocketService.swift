@@ -1,6 +1,6 @@
 //
 //  WebSocketService.swift
-//  Fluxer Gateway WebSocket client
+//  Flukavike Gateway WebSocket client
 //
 
 import SwiftUI
@@ -10,7 +10,7 @@ class WebSocketService: NSObject {
     static let shared = WebSocketService()
     
     private var webSocketTask: URLSessionWebSocketTask?
-    private let gatewayURL = "wss://gateway.fluxer.app/?v=1&encoding=json"
+    private var gatewayURL = "wss://gateway.fluxer.app/?v=1&encoding=json"
     
     var isConnected: Bool = false
     var connectionState: ConnectionState = .disconnected
@@ -35,8 +35,8 @@ class WebSocketService: NSObject {
     var onMessageDelete: ((String) -> Void)?
     var onTypingStart: ((TypingEvent) -> Void)?
     var onPresenceUpdate: ((PresenceUpdate) -> Void)?
-    var onCallCreate: ((FluxerCall) -> Void)?
-    var onCallUpdate: ((FluxerCall) -> Void)?
+    var onCallCreate: ((FlukavikeCall) -> Void)?
+    var onCallUpdate: ((FlukavikeCall) -> Void)?
     var onCallDelete: ((String) -> Void)?
     var onVoiceStateUpdate: ((VoiceState) -> Void)?
     var onSpeaking: ((String, Bool) -> Void)?
@@ -50,6 +50,16 @@ class WebSocketService: NSObject {
         case connected
         case reconnecting
         case error(String)
+    }
+    
+    /// Updates the gateway URL (called after instance discovery)
+    func setGatewayURL(_ url: String) {
+        var wsURL = url
+        // Ensure it has query params for encoding
+        if !wsURL.contains("?") {
+            wsURL += "/?v=1&encoding=json"
+        }
+        self.gatewayURL = wsURL
     }
     
     // MARK: - Connection
@@ -208,14 +218,14 @@ class WebSocketService: NSObject {
             }
             
         case "CALL_CREATE":
-            if let call = try? decode(FluxerCall.self, from: eventData) {
+            if let call = try? decode(FlukavikeCall.self, from: eventData) {
                 DispatchQueue.main.async { [weak self] in
                     self?.onCallCreate?(call)
                 }
             }
             
         case "CALL_UPDATE":
-            if let call = try? decode(FluxerCall.self, from: eventData) {
+            if let call = try? decode(FlukavikeCall.self, from: eventData) {
                 DispatchQueue.main.async { [weak self] in
                     self?.onCallUpdate?(call)
                 }
@@ -333,7 +343,7 @@ class WebSocketService: NSObject {
                 "token": token,
                 "properties": [
                     "os": "iOS",
-                    "browser": "Fluxer Mobile",
+                    "browser": "Flukavike Mobile",
                     "device": UIDevice.current.model
                 ],
                 "compress": false,
@@ -464,7 +474,7 @@ class WebSocketService: NSObject {
     
     private func decode<T: Decodable>(_ type: T.Type, from dict: [String: Any]) throws -> T {
         let data = try JSONSerialization.data(withJSONObject: dict)
-        return try JSONDecoder.fluxer.decode(type, from: data)
+        return try JSONDecoder.flukavike.decode(type, from: data)
     }
 }
 

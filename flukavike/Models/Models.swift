@@ -1,6 +1,6 @@
 //
 //  Models.swift
-//  Data models for Fluxer
+//  Data models for Flukavike
 //
 
 import Foundation
@@ -77,10 +77,10 @@ struct Server: Identifiable, Codable, Equatable {
     
     static let preview = Server(
         id: "1",
-        name: "Fluxer HQ",
+        name: "Flukavike HQ",
         iconUrl: nil,
         bannerUrl: nil,
-        description: "Official Fluxer community",
+        description: "Official Flukavike community",
         memberCount: 15420,
         instance: "fluxer.app",
         channels: Channel.previewChannels
@@ -160,7 +160,7 @@ struct Channel: Identifiable, Codable, Equatable {
             id: "c2",
             serverId: "1",
             name: "general",
-            topic: "General discussion about Fluxer",
+            topic: "General discussion about Flukavike",
             type: .text,
             position: 1,
             parentId: nil,
@@ -172,7 +172,7 @@ struct Channel: Identifiable, Codable, Equatable {
             id: "c3",
             serverId: "1",
             name: "help",
-            topic: "Get help with Fluxer",
+            topic: "Get help with Flukavike",
             type: .text,
             position: 2,
             parentId: nil,

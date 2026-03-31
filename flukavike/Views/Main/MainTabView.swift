@@ -112,7 +112,7 @@ struct FloatingComposeButton: View {
     }
 }
 
-// MARK: - Hexagon Shape (Fluxer brand element)
+// MARK: - Hexagon Shape (Flukavike brand element)
 struct HexagonShape: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()

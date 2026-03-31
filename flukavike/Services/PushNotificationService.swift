@@ -1,6 +1,6 @@
 //
 //  PushNotificationService.swift
-//  Push notification handling for Fluxer
+//  Push notification handling for Flukavike
 //
 
 import SwiftUI
@@ -46,7 +46,7 @@ class PushNotificationService: NSObject {
         self.deviceToken = tokenString
         self.isRegistered = true
         
-        // Send to Fluxer server
+        // Send to Flukavike server
         Task {
             await registerTokenWithServer(tokenString)
         }

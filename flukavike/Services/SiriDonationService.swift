@@ -25,7 +25,7 @@ class SiriDonationService {
             content: nil, // Don't include actual content for privacy
             speakableGroupName: channel.map { INSpeakableString(spokenPhrase: "#\($0.name)") },
             conversationIdentifier: channel?.id ?? recipient.id,
-            serviceName: "Fluxer",
+            serviceName: "Flukavike",
             sender: nil,
             attachments: nil
         )
@@ -75,7 +75,7 @@ class SiriDonationService {
     func donateJoinVoiceChannel(server: Server, channel: Channel) {
         // Note: JoinVoiceChannelIntent would need to be defined in the Intent Definition File
         // For now, we use a custom user activity
-        let userActivity = NSUserActivity(activityType: "com.fluxer.joinVoiceChannel")
+        let userActivity = NSUserActivity(activityType: "com.flukavike.joinVoiceChannel")
         userActivity.title = "Join \(channel.name) in \(server.name)"
         userActivity.userInfo = [
             "serverId": server.id,
@@ -107,7 +107,7 @@ class SiriDonationService {
     
     /// Donate viewing a specific channel
     func donateViewChannel(_ channel: Channel, in server: Server) {
-        let userActivity = NSUserActivity(activityType: "com.fluxer.viewChannel")
+        let userActivity = NSUserActivity(activityType: "com.flukavike.viewChannel")
         userActivity.title = "View #\(channel.name)"
         userActivity.userInfo = [
             "channelId": channel.id,
@@ -123,7 +123,7 @@ class SiriDonationService {
     
     /// Donate viewing a user profile
     func donateViewProfile(user: User) {
-        let userActivity = NSUserActivity(activityType: "com.fluxer.viewProfile")
+        let userActivity = NSUserActivity(activityType: "com.flukavike.viewProfile")
         userActivity.title = "View \(user.displayName ?? user.username)'s Profile"
         userActivity.userInfo = [
             "userId": user.id,
@@ -154,7 +154,7 @@ class SiriDonationService {
     
     private func donate(intent: INIntent) {
         let interaction = INInteraction(intent: intent, response: nil)
-        interaction.groupIdentifier = "com.fluxer.mobile"
+        interaction.groupIdentifier = "com.flukavike.mobile"
         
         interaction.donate { error in
             if let error = error {

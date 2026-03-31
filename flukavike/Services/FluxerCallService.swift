@@ -1,6 +1,6 @@
 //
-//  FluxerCallService.swift
-//  Call handling using Fluxer API
+//  FlukavikeCallService.swift
+//  Call handling using Flukavike API
 //
 
 import SwiftUI
@@ -8,8 +8,8 @@ import CallKit
 import AVFoundation
 
 @Observable
-class FluxerCallService: NSObject {
-    static let shared = FluxerCallService()
+class FlukavikeCallService: NSObject {
+    static let shared = FlukavikeCallService()
     
     private let callController = CXCallController()
     private var provider: CXProvider?
@@ -17,7 +17,7 @@ class FluxerCallService: NSObject {
     private(set) var webSocketService: WebSocketService?
     
     // Current call state
-    var activeCall: FluxerCall?
+    var activeCall: FlukavikeCall?
     var isMuted: Bool = false
     var isVideoEnabled: Bool = false
     var isScreenSharing: Bool = false
@@ -47,7 +47,7 @@ class FluxerCallService: NSObject {
     // MARK: - CallKit Setup
     
     private func setupCallKit() {
-        let configuration = CXProviderConfiguration(localizedName: "Fluxer")
+        let configuration = CXProviderConfiguration(localizedName: "Flukavike")
         configuration.supportsVideo = true
         configuration.supportedHandleTypes = [.generic]
         configuration.ringtoneSound = "ringtone.caf"
@@ -84,7 +84,7 @@ class FluxerCallService: NSObject {
     
     // MARK: - Incoming Calls
     
-    private func handleIncomingCall(_ call: FluxerCall) {
+    private func handleIncomingCall(_ call: FlukavikeCall) {
         guard call.status == .ringing else { return }
         
         let update = CXCallUpdate()
@@ -114,8 +114,8 @@ class FluxerCallService: NSObject {
     
     // MARK: - Start Call (via API)
     
-    func startCall(channelId: String, type: FluxerCall.CallType) async throws {
-        // Create call via Fluxer API
+    func startCall(channelId: String, type: FlukavikeCall.CallType) async throws {
+        // Create call via Flukavike API
         // POST /channels/{channel.id}/calls
         let call = try await apiService?.createCall(channelId: channelId, type: type)
         
@@ -186,7 +186,7 @@ class FluxerCallService: NSObject {
         
         guard let voiceInfo = voiceInfo else { return }
         
-        // Connect to Fluxer voice gateway
+        // Connect to Flukavike voice gateway
         voiceConnection = VoiceConnection(
             endpoint: voiceInfo.endpoint,
             token: voiceInfo.token,
@@ -288,7 +288,7 @@ class FluxerCallService: NSObject {
     
     // MARK: - Private Helpers
     
-    private func handleCallUpdate(_ call: FluxerCall) {
+    private func handleCallUpdate(_ call: FlukavikeCall) {
         DispatchQueue.main.async { [weak self] in
             if call.id == self?.activeCall?.id {
                 self?.activeCall = call
@@ -325,7 +325,7 @@ class FluxerCallService: NSObject {
 }
 
 // MARK: - CXProviderDelegate
-extension FluxerCallService: CXProviderDelegate {
+extension FlukavikeCallService: CXProviderDelegate {
     
     func providerDidReset(_ provider: CXProvider) {
         Task {
@@ -380,7 +380,7 @@ extension FluxerCallService: CXProviderDelegate {
 
 // MARK: - Models
 
-struct FluxerCall: Identifiable, Codable, Equatable {
+struct FlukavikeCall: Identifiable, Codable, Equatable {
     let id: String
     let channelId: String
     let guildId: String?
@@ -451,9 +451,9 @@ class VoiceConnection {
     }
     
     func connect() async throws {
-        // Connect to Fluxer voice gateway
+        // Connect to Flukavike voice gateway
         // Exchange SDP and ICE candidates
-        // This uses WebRTC under the hood but via Fluxer protocol
+        // This uses WebRTC under the hood but via Flukavike protocol
     }
     
     func disconnect() {
