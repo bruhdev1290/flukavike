@@ -444,7 +444,7 @@ struct LoginView: View {
                 
                 let response = try await AuthService.shared.login(
                     instance: instance,
-                    username: username,
+                    login: username,
                     password: password,
                     captchaKey: captchaToken
                 )

@@ -45,10 +45,10 @@ class AuthService {
     
     // MARK: - Login
     
-    func login(instance: String, username: String, password: String, captchaKey: String? = nil) async throws -> LoginResponse {
+    func login(instance: String, login: String, password: String, captchaKey: String? = nil) async throws -> LoginResponse {
         let response = try await APIService.shared.login(
             instance: instance,
-            username: username,
+            login: login,
             password: password,
             captchaKey: captchaKey
         )

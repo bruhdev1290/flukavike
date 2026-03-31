@@ -6,106 +6,13 @@
 import SwiftUI
 import HCaptcha
 
-// MARK: - HCaptcha Manager
-
-/// Manages the shared HCaptcha instance and validation flow
-@MainActor
-class HCaptchaManager: ObservableObject {
-    static let shared = HaptchaManager()
-    
-    private var hcaptcha: HCaptcha?
-    private var isConfigured = false
-    
-    /// Configure the HCaptcha instance with a site key
-    func configure(siteKey: String) {
-        guard !isConfigured || hcaptcha == nil else { return }
-        
-        hcaptcha = try? HCaptcha(
-            apiKey: siteKey,
-            baseURL: nil,
-            locale: nil,
-            size: .compact
-        )
-        isConfigured = true
-    }
-    
-    /// Reset configuration when switching instances
-    func reset() {
-        hcaptcha = nil
-        isConfigured = false
-    }
-    
-    /// Validate and get token
-    func validate(on viewController: UIViewController, completion: @escaping (Result<String, Error>) -> Void) {
-        guard let hcaptcha = hcaptcha else {
-            completion(.failure(HCaptchaError.notConfigured))
-            return
-        }
-        
-        hcaptcha.validate(on: viewController) { result in
-            switch result {
-            case .token(let token):
-                completion(.success(token))
-            case .error(let error):
-                completion(.failure(error))
-            }
-        }
-    }
-}
-
-enum HCaptchaError: LocalizedError {
-    case notConfigured
-    case validationFailed(String)
-    
-    var errorDescription: String? {
-        switch self {
-        case .notConfigured:
-            return "hCaptcha not configured"
-        case .validationFailed(let message):
-            return message
-        }
-    }
-}
-
-// MARK: - HCaptcha SwiftUI View
-
-struct HCaptchaView: UIViewControllerRepresentable {
-    let siteKey: String
-    let onToken: (String) -> Void
-    let onError: (String) -> Void
-    
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onToken: onToken, onError: onError)
-    }
-    
-    func makeUIViewController(context: Context) -> UIViewController {
-        let viewController = HCaptchaViewController()
-        viewController.siteKey = siteKey
-        viewController.onToken = onToken
-        viewController.onError = onError
-        return viewController
-    }
-    
-    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {
-        // No updates needed
-    }
-    
-    class Coordinator {
-        let onToken: (String) -> Void
-        let onError: (String) -> Void
-        
-        init(onToken: @escaping (String) -> Void, onError: @escaping (String) -> Void) {
-            self.onToken = onToken
-            self.onError = onError
-        }
-    }
-}
-
 // MARK: - HCaptcha View Controller
 
 /// UIViewController that hosts the hCaptcha challenge
 class HCaptchaViewController: UIViewController {
     var siteKey: String?
+    var baseURL: URL?
+    var hostDomain: String?
     var onToken: ((String) -> Void)?
     var onError: ((String) -> Void)?
     
@@ -138,13 +45,19 @@ class HCaptchaViewController: UIViewController {
             return
         }
         
-        // Initialize hCaptcha with site key
+        // Log the parameters for debugging
+        print("[HCaptcha] baseURL: \(baseURL?.absoluteString ?? "nil")")
+        print("[HCaptcha] hostDomain: \(hostDomain ?? "nil")")
+        print("[HCaptcha] siteKey prefix: \(String(siteKey.prefix(8)))...")
+        
+        // Initialize hCaptcha with site key, base URL, and host for proper origin
         do {
             hcaptcha = try HCaptcha(
                 apiKey: siteKey,
-                baseURL: nil,
+                baseURL: baseURL,
                 locale: nil,
-                size: .compact
+                size: .compact,
+                host: hostDomain
             )
             
             // Configure webview appearance
@@ -162,14 +75,18 @@ class HCaptchaViewController: UIViewController {
                 DispatchQueue.main.async {
                     switch result {
                     case .token(let token):
+                        print("[HCaptcha] Token received successfully")
                         self.onToken?(token)
                     case .error(let error):
-                        self.onError?(self.errorMessage(for: error))
+                        let message = self.errorMessage(for: error)
+                        print("[HCaptcha] Error: \(message)")
+                        self.onError?(message)
                     }
                 }
             }
             
         } catch {
+            print("[HCaptcha] Init error: \(error)")
             onError?("Failed to initialize hCaptcha: \(error.localizedDescription)")
         }
     }
@@ -197,6 +114,30 @@ class HCaptchaViewController: UIViewController {
         @unknown default:
             return "Verification failed: \(error.localizedDescription)"
         }
+    }
+}
+
+// MARK: - HCaptcha SwiftUI View
+
+struct HCaptchaView: UIViewControllerRepresentable {
+    let siteKey: String
+    let baseURL: URL?
+    let hostDomain: String?
+    let onToken: (String) -> Void
+    let onError: (String) -> Void
+    
+    func makeUIViewController(context: Context) -> UIViewController {
+        let viewController = HCaptchaViewController()
+        viewController.siteKey = siteKey
+        viewController.baseURL = baseURL
+        viewController.hostDomain = hostDomain
+        viewController.onToken = onToken
+        viewController.onError = onError
+        return viewController
+    }
+    
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {
+        // No updates needed
     }
 }
 
@@ -232,6 +173,8 @@ struct HCaptchaSheetView: View {
                 
                 HCaptchaView(
                     siteKey: siteKey,
+                    baseURL: captchaBaseURL(),
+                    hostDomain: captchaHostDomain(),
                     onToken: { token in
                         onCompleted(token)
                         dismiss()
@@ -254,5 +197,48 @@ struct HCaptchaSheetView: View {
                 }
             }
         }
+    }
+    
+    /// Returns the base URL for hCaptcha origin validation
+    private func captchaBaseURL() -> URL? {
+        let webBaseURL = APIService.shared.webBaseURL
+        print("[HCaptcha] APIService.webBaseURL: \(webBaseURL)")
+        
+        if !webBaseURL.isEmpty, let url = URL(string: webBaseURL) {
+            print("[HCaptcha] Using baseURL: \(url)")
+            return url
+        }
+        
+        let instance = APIService.shared.currentInstance
+        if !instance.isEmpty, let url = URL(string: "https://\(instance)") {
+            print("[HCaptcha] Using instance baseURL: \(url)")
+            return url
+        }
+        
+        // DEBUG: Hardcode your domain here to test
+        // return URL(string: "https://your-actual-domain.com")
+        
+        print("[HCaptcha] WARNING: No baseURL available")
+        return nil
+    }
+    
+    /// Returns the host domain for hCaptcha host parameter
+    private func captchaHostDomain() -> String? {
+        // Use the host from webBaseURL if available
+        let webBaseURL = APIService.shared.webBaseURL
+        if !webBaseURL.isEmpty, let url = URL(string: webBaseURL) {
+            let host = url.host
+            print("[HCaptcha] Using hostDomain: \(host ?? "nil")")
+            return host
+        }
+        
+        // Fallback to current instance
+        let instance = APIService.shared.currentInstance
+        if !instance.isEmpty {
+            print("[HCaptcha] Using instance hostDomain: \(instance)")
+            return instance
+        }
+        
+        return nil
     }
 }

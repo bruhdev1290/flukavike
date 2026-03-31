@@ -139,12 +139,12 @@ class APIService {
     
     // MARK: - Authentication
     
-    func login(instance: String, username: String, password: String, captchaKey: String? = nil) async throws -> LoginResponse {
+    func login(instance: String, login: String, password: String, captchaKey: String? = nil) async throws -> LoginResponse {
         // Run discovery before login to find the correct API URL
         try await discoverInstance(instance)
         
-        var body = [
-            "username": username,
+        var body: [String: String] = [
+            "login": login,
             "password": password
         ]
         if let captchaKey {
