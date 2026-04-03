@@ -26,6 +26,26 @@ class APIService {
     var captchaRequired: Bool { captchaConfig != nil }
     
     private var baseURL: String { apiBaseURL }
+
+    private var activeAuthToken: String? {
+        WebAuthService.shared.authToken ?? authToken
+    }
+
+    private let blockedRequestHeaders: Set<String> = [
+        "authorization",
+        "connection",
+        "content-length",
+        "cookie",
+        "host",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailer",
+        "trailers",
+        "transfer-encoding",
+        "upgrade"
+    ]
     
     // MARK: - Initialization
     
@@ -55,7 +75,7 @@ class APIService {
     /// Resets to default Fluxer instance URLs
     func resetToDefaultInstance() {
         self.currentInstance = Self.defaultInstance
-        self.apiBaseURL = "https://api.fluxer.app"
+        self.apiBaseURL = "https://api.fluxer.app/v1"
         self.webBaseURL = "https://web.fluxer.app"
         self.gatewayURL = "wss://gateway.fluxer.app"
         self.captchaConfig = nil
@@ -69,6 +89,68 @@ class APIService {
     }
     
     // MARK: - Authentication
+
+    private struct AuthResponsePayload: Decodable {
+        let token: String
+        let refreshToken: String?
+        let user: User?
+
+        private enum CodingKeys: String, CodingKey {
+            case token
+            case accessToken = "access_token"
+            case refreshToken
+            case user
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            token = try container.decodeIfPresent(String.self, forKey: .token)
+                ?? container.decode(String.self, forKey: .accessToken)
+            refreshToken = try container.decodeIfPresent(String.self, forKey: .refreshToken)
+            user = try container.decodeIfPresent(User.self, forKey: .user)
+        }
+    }
+
+    private struct AuthMfaRequiredPayload: Decodable {
+        let mfa: Bool
+        let ticket: String
+        let allowedMethods: [String]
+
+        private enum CodingKeys: String, CodingKey {
+            case mfa
+            case ticket
+            case allowedMethods = "allowed_methods"
+        }
+    }
+
+    private func decodeAuthResponse(from data: Data) async throws -> LoginResponse {
+        let decoder = JSONDecoder.flukavike
+        if let direct = try? decoder.decode(LoginResponse.self, from: data) {
+            return direct
+        }
+
+        // Backend may return MFA-required response instead of a token payload.
+        if let mfaPayload = try? decoder.decode(AuthMfaRequiredPayload.self, from: data), mfaPayload.mfa {
+            throw APIError.mfaRequired(ticket: mfaPayload.ticket, allowedMethods: mfaPayload.allowedMethods)
+        }
+
+        let payload = try decoder.decode(AuthResponsePayload.self, from: data)
+
+        // Some instances return token-only login payloads; fetch user profile explicitly.
+        let resolvedUser: User
+        if let user = payload.user {
+            resolvedUser = user
+        } else {
+            setAuthToken(payload.token)
+            resolvedUser = try await getCurrentUser()
+        }
+
+        return LoginResponse(
+            token: payload.token,
+            refreshToken: payload.refreshToken,
+            user: resolvedUser
+        )
+    }
     
     func setAuthToken(_ token: String) {
         self.authToken = token
@@ -138,8 +220,8 @@ class APIService {
             }
         }
         
-        // Fallback: assume standard layout
-        self.apiBaseURL = "https://\(normalized)/api"
+        // Fallback: assume standard Fluxer layout with /v1 prefix
+        self.apiBaseURL = "https://\(normalized)/v1"
         self.gatewayURL = ""
         self.cdnURL = ""
         self.webBaseURL = "https://\(normalized)"
@@ -227,6 +309,137 @@ class APIService {
         let sanitized = String(String.UnicodeScalarView(filteredScalars))
         return sanitized.isEmpty ? nil : sanitized
     }
+
+    private func parseErrorCode(from json: [String: Any]?) -> String? {
+        guard let json else { return nil }
+
+        if let code = json["code"] as? String, !code.isEmpty {
+            return code
+        }
+        if let code = json["code"] as? Int {
+            return String(code)
+        }
+
+        if let nested = json["error"] as? [String: Any] {
+            if let code = nested["code"] as? String, !code.isEmpty {
+                return code
+            }
+            if let code = nested["code"] as? Int {
+                return String(code)
+            }
+        }
+
+        if let errorString = json["error"] as? String, !errorString.isEmpty {
+            if isCaptchaMessage(errorString) {
+                return "7"
+            }
+        }
+
+        if let code = json["error_code"] as? String, !code.isEmpty {
+            return code
+        }
+        if let code = json["error_code"] as? Int {
+            return String(code)
+        }
+
+        return nil
+    }
+
+    private func parseErrorMessage(from json: [String: Any]?) -> String? {
+        guard let json else { return nil }
+        if let message = json["message"] as? String, !message.isEmpty {
+            return message
+        }
+        if let errorString = json["error"] as? String, !errorString.isEmpty {
+            return errorString
+        }
+        if let nested = json["error"] as? [String: Any],
+           let message = nested["message"] as? String,
+           !message.isEmpty {
+            return message
+        }
+        return nil
+    }
+
+    private func parseErrorData(from json: [String: Any]?) -> [String: Any]? {
+        guard let json else { return nil }
+
+        if let data = json["data"] as? [String: Any] {
+            return data
+        }
+
+        if let error = json["error"] as? [String: Any],
+           let data = error["data"] as? [String: Any] {
+            return data
+        }
+
+        return nil
+    }
+
+    private func parseIpAuthorizationDetails(from json: [String: Any]?) -> (ticket: String?, email: String?, resendAvailableIn: Int?) {
+        let data = parseErrorData(from: json)
+
+        let ticket = (data?["ticket"] as? String)
+        let email = (data?["email"] as? String)
+        let resendAvailableIn = data?["resend_available_in"] as? Int
+
+        return (ticket, email, resendAvailableIn)
+    }
+
+    private func isCaptchaMessage(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        if lower == "7" || lower.contains("captcha") || lower.contains("api error 7") {
+            return true
+        }
+
+        // Normalize punctuation/spacing so variants like "API Error #7" still match.
+        let normalized = lower.filter { $0.isLetter || $0.isNumber }
+        return normalized.contains("apierror7")
+    }
+
+    private func isCaptchaErrorCode(_ code: String?) -> Bool {
+        guard let code else { return false }
+        let normalized = code.uppercased()
+        return normalized == "CAPTCHA_REQUIRED"
+            || code == "captcha-required"
+            || normalized == "INVALID_CAPTCHA"
+            || code == "7"
+    }
+
+    private func captchaTypeHeaderValue() -> String {
+        let provider = captchaConfig?.provider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return provider?.isEmpty == false ? provider! : "hcaptcha"
+    }
+
+    private func applyDefaultHeaders(to request: inout URLRequest) {
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("mobile", forHTTPHeaderField: "X-Fluxer-Platform")
+
+        // Match browser origin behavior expected by Fluxer API for auth/captcha enforcement.
+        if !webBaseURL.isEmpty {
+            request.setValue(webBaseURL, forHTTPHeaderField: "Origin")
+        } else if !currentInstance.isEmpty {
+            request.setValue("https://\(currentInstance)", forHTTPHeaderField: "Origin")
+        }
+    }
+
+    private func sanitizeAdditionalHeaders(_ headers: [String: String], includeAuthorization: Bool) -> [String: String] {
+        var sanitized: [String: String] = [:]
+
+        for (header, value) in headers {
+            let lowercasedHeader = header.lowercased()
+            if blockedRequestHeaders.contains(lowercasedHeader) {
+                if includeAuthorization && lowercasedHeader == "authorization" {
+                    sanitized[header] = value
+                }
+                continue
+            }
+
+            sanitized[header] = value
+        }
+
+        return sanitized
+    }
     
     // MARK: - Authentication
     
@@ -235,19 +448,32 @@ class APIService {
         try await discoverInstance(instance)
         
         var body: [String: String] = [
-            "login": login,
+            "email": login,
             "password": password
         ]
+
+        var headers: [String: String] = [:]
         if let captchaKey {
             body["captcha_key"] = captchaKey
+            headers["X-Captcha-Token"] = captchaKey
+            headers["X-Captcha-Type"] = captchaTypeHeaderValue()
         }
         let bodyData = try JSONEncoder.flukavike.encode(body)
         let data = try await makeRequest(
             endpoint: "/auth/login",
             method: "POST",
-            body: bodyData
+            body: bodyData,
+            includeAuthorization: false,
+            additionalHeaders: headers
         )
-        return try JSONDecoder.flukavike.decode(LoginResponse.self, from: data)
+
+        do {
+            return try await decodeAuthResponse(from: data)
+        } catch let apiError as APIError {
+            throw apiError
+        } catch {
+            throw APIError.decodingError(error)
+        }
     }
     
     func register(instance: String, username: String, email: String, password: String, captchaKey: String? = nil) async throws -> LoginResponse {
@@ -259,16 +485,29 @@ class APIService {
             "email": email,
             "password": password
         ]
+
+        var headers: [String: String] = [:]
         if let captchaKey {
             body["captcha_key"] = captchaKey
+            headers["X-Captcha-Token"] = captchaKey
+            headers["X-Captcha-Type"] = captchaTypeHeaderValue()
         }
         let bodyData = try JSONEncoder.flukavike.encode(body)
         let data = try await makeRequest(
             endpoint: "/auth/register",
             method: "POST",
-            body: bodyData
+            body: bodyData,
+            includeAuthorization: false,
+            additionalHeaders: headers
         )
-        return try JSONDecoder.flukavike.decode(LoginResponse.self, from: data)
+
+        do {
+            return try await decodeAuthResponse(from: data)
+        } catch let apiError as APIError {
+            throw apiError
+        } catch {
+            throw APIError.decodingError(error)
+        }
     }
     
     func refreshToken(refreshToken: String) async throws -> RefreshResponse {
@@ -292,7 +531,9 @@ class APIService {
     private func makeRequest(
         endpoint: String,
         method: String = "GET",
-        body: Data? = nil
+        body: Data? = nil,
+        includeAuthorization: Bool = true,
+        additionalHeaders: [String: String] = [:]
     ) async throws -> Data {
         guard let url = URL(string: "\(baseURL)\(endpoint)") else {
             throw APIError.invalidURL
@@ -300,59 +541,80 @@ class APIService {
         
         var request = URLRequest(url: url)
         request.httpMethod = method
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyDefaultHeaders(to: &request)
         
-        // Set Origin header to match the web frontend (required by Fluxer API)
-        if !webBaseURL.isEmpty {
-            request.setValue(webBaseURL, forHTTPHeaderField: "Origin")
-        } else if !currentInstance.isEmpty {
-            request.setValue("https://\(currentInstance)", forHTTPHeaderField: "Origin")
+        if includeAuthorization {
+            // Use session token from WebAuthService for authenticated requests
+            if let token = activeAuthToken, !token.isEmpty {
+                request.setValue(token, forHTTPHeaderField: "Authorization")
+            }
         }
-        
-        if let token = authToken {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let sanitizedHeaders = sanitizeAdditionalHeaders(additionalHeaders, includeAuthorization: includeAuthorization)
+        for (header, value) in sanitizedHeaders {
+            request.setValue(value, forHTTPHeaderField: header)
         }
         
         if let body = body {
             request.httpBody = body
         }
         
+        print("[API] \(method) \(url.absoluteString)")
         let (data, response) = try await urlSession.data(for: request)
-        
+
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.invalidResponse
         }
-        
+
+        print("[API] → \(httpResponse.statusCode)")
+
+        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let code = parseErrorCode(from: json)
+        let message = parseErrorMessage(from: json)
+        let rawBody = String(data: data, encoding: .utf8) ?? ""
+        let normalizedCode = code?.uppercased()
+
+        let messageText = message ?? ""
+        let rawText = rawBody
+        let captchaLikeMessage = isCaptchaMessage(messageText) || isCaptchaMessage(rawText)
+
+        if normalizedCode == "IP_AUTHORIZATION_REQUIRED" {
+            let details = parseIpAuthorizationDetails(from: json)
+            throw APIError.ipAuthorizationRequired(
+                ticket: details.ticket,
+                email: details.email,
+                resendAvailableIn: details.resendAvailableIn
+            )
+        }
+
+        if isCaptchaErrorCode(code) || captchaLikeMessage {
+            let details = captchaDetails(from: json)
+            let sitekey = sanitizedCaptchaSiteKey(details.sitekey)
+                ?? sanitizedCaptchaSiteKey(captchaConfig?.sitekey)
+                ?? Self.fallbackHCaptchaSiteKey
+            let service = details.service ?? captchaConfig?.provider
+            throw APIError.captchaRequired(sitekey: sitekey, service: service)
+        }
+
         switch httpResponse.statusCode {
         case 200...299:
             return data
         case 400:
-            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-            let code = json?["code"] as? String
-            if code == "CAPTCHA_REQUIRED" || code == "captcha-required" {
-                let details = captchaDetails(from: json)
-                let sitekey = sanitizedCaptchaSiteKey(details.sitekey)
-                    ?? sanitizedCaptchaSiteKey(captchaConfig?.sitekey)
-                    ?? Self.fallbackHCaptchaSiteKey
-                let service = details.service ?? captchaConfig?.provider
-                throw APIError.captchaRequired(sitekey: sitekey, service: service)
-            }
-            let errorBody = String(data: data, encoding: .utf8) ?? "no body"
-            print("[API] Error 400: \(errorBody)")
-            let message = json?["message"] as? String
+            print("[API] Error 400: \(rawBody)")
             throw APIError.serverError(statusCode: 400, message: message)
         case 401:
             throw APIError.unauthorized
         case 403:
-            let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["message"] as? String
+            print("[API] Error 403: \(rawBody)")
             throw APIError.forbidden(message: message)
         case 404:
+            print("[API] Error 404: \(url.absoluteString)")
             throw APIError.notFound
         case 429:
+            print("[API] Error 429 (rate limited): \(rawBody)")
             throw APIError.rateLimited
         default:
-            let errorBody = String(data: data, encoding: .utf8) ?? "no body"
-            print("[API] Error \(httpResponse.statusCode): \(errorBody)")
+            print("[API] Error \(httpResponse.statusCode): \(rawBody)")
             let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["message"] as? String
             throw APIError.serverError(statusCode: httpResponse.statusCode, message: message)
         }
@@ -420,15 +682,15 @@ class APIService {
         var request = URLRequest(url: URL(string: "\(baseURL)/channels/\(channelId)/messages")!)
         request.httpMethod = "POST"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        
+        request.setValue("mobile", forHTTPHeaderField: "X-Fluxer-Platform")
         if !webBaseURL.isEmpty {
             request.setValue(webBaseURL, forHTTPHeaderField: "Origin")
         } else if !currentInstance.isEmpty {
             request.setValue("https://\(currentInstance)", forHTTPHeaderField: "Origin")
         }
         
-        if let token = authToken {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let token = activeAuthToken, !token.isEmpty {
+            request.setValue(token, forHTTPHeaderField: "Authorization")
         }
         
         var body = Data()
@@ -585,10 +847,81 @@ struct InstanceConfig: Decodable {
         case api, gateway, cdn
         case publicApi = "public_api"
         case web, admin, invite, captcha
+        case endpoints
         case name, description, icon, banner
         case publicInstance = "public_instance"
         case userCount = "user_count"
         case version, features
+    }
+
+    private struct EndpointsConfig: Decodable {
+        let api: String?
+        let apiClient: String?
+        let apiPublic: String?
+        let gateway: String?
+        let media: String?
+        let staticCdn: String?
+        let webapp: String?
+        let admin: String?
+        let invite: String?
+
+        enum CodingKeys: String, CodingKey {
+            case api, gateway, media, admin, invite
+            case apiClient = "api_client"
+            case apiPublic = "api_public"
+            case staticCdn = "static_cdn"
+            case webapp
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let endpoints = try container.decodeIfPresent(EndpointsConfig.self, forKey: .endpoints)
+
+        let resolvedApi =
+            try container.decodeIfPresent(String.self, forKey: .api)
+            ?? endpoints?.api
+            ?? endpoints?.apiClient
+            ?? endpoints?.apiPublic
+
+        guard let api = resolvedApi else {
+            throw DecodingError.keyNotFound(
+                CodingKeys.api,
+                DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Missing API endpoint")
+            )
+        }
+
+        self.api = api
+        self.gateway =
+            (try container.decodeIfPresent(String.self, forKey: .gateway))
+            ?? endpoints?.gateway
+            ?? ""
+        self.cdn =
+            (try container.decodeIfPresent(String.self, forKey: .cdn))
+            ?? endpoints?.staticCdn
+            ?? endpoints?.media
+        self.publicApi =
+            (try container.decodeIfPresent(String.self, forKey: .publicApi))
+            ?? endpoints?.apiPublic
+        self.web =
+            (try container.decodeIfPresent(String.self, forKey: .web))
+            ?? endpoints?.webapp
+        self.admin =
+            (try container.decodeIfPresent(String.self, forKey: .admin))
+            ?? endpoints?.admin
+        self.invite =
+            (try container.decodeIfPresent(String.self, forKey: .invite))
+            ?? endpoints?.invite
+        self.captcha = try container.decodeIfPresent(CaptchaConfig.self, forKey: .captcha)
+
+        self.name = try container.decodeIfPresent(String.self, forKey: .name)
+        self.description = try container.decodeIfPresent(String.self, forKey: .description)
+        self.icon = try container.decodeIfPresent(String.self, forKey: .icon)
+        self.banner = try container.decodeIfPresent(String.self, forKey: .banner)
+        self.publicInstance = try container.decodeIfPresent(Bool.self, forKey: .publicInstance)
+        self.userCount = try container.decodeIfPresent(Int.self, forKey: .userCount)
+        self.version = try container.decodeIfPresent(String.self, forKey: .version)
+        self.features = try container.decodeIfPresent([String].self, forKey: .features)
     }
     
     struct CaptchaConfig: Decodable {
@@ -602,20 +935,41 @@ struct InstanceConfig: Decodable {
             case siteKey
             case site_key
             case key
+            case hcaptchaSiteKey = "hcaptcha_site_key"
+            case turnstileSiteKey = "turnstile_site_key"
         }
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
 
-            provider = try container.decodeIfPresent(String.self, forKey: .provider)
+            let explicitProvider = (try container.decodeIfPresent(String.self, forKey: .provider)
                 ?? container.decodeIfPresent(String.self, forKey: .service)
-                ?? "hcaptcha"
+                ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+
+            let hcaptchaSiteKey = try container.decodeIfPresent(String.self, forKey: .hcaptchaSiteKey)
+            let turnstileSiteKey = try container.decodeIfPresent(String.self, forKey: .turnstileSiteKey)
 
             sitekey = try container.decodeIfPresent(String.self, forKey: .sitekey)
                 ?? container.decodeIfPresent(String.self, forKey: .siteKey)
                 ?? container.decodeIfPresent(String.self, forKey: .site_key)
                 ?? container.decodeIfPresent(String.self, forKey: .key)
+                ?? hcaptchaSiteKey
+                ?? turnstileSiteKey
                 ?? ""
+
+            if explicitProvider.isEmpty || explicitProvider == "none" {
+                if let turnstileSiteKey, !turnstileSiteKey.isEmpty {
+                    provider = "turnstile"
+                } else if let hcaptchaSiteKey, !hcaptchaSiteKey.isEmpty {
+                    provider = "hcaptcha"
+                } else {
+                    provider = "hcaptcha"
+                }
+            } else {
+                provider = explicitProvider
+            }
         }
 
         init(provider: String, sitekey: String) {
@@ -632,8 +986,10 @@ enum APIError: Error {
     case invalidResponse
     case unauthorized
     case forbidden(message: String?)
+    case ipAuthorizationRequired(ticket: String?, email: String?, resendAvailableIn: Int?)
     case notFound
     case rateLimited
+    case mfaRequired(ticket: String, allowedMethods: [String])
     case captchaRequired(sitekey: String?, service: String?)
     case serverError(statusCode: Int, message: String? = nil)
     case decodingError(Error)

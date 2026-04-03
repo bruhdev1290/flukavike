@@ -18,17 +18,98 @@ struct User: Identifiable, Codable, Equatable {
     let customStatus: String?
     let bot: Bool
     let createdAt: Date
-    
+
     var displayUsername: String { "@\(username)" }
     var formattedName: String { displayName ?? username }
-    
+
+    // Memberwise initialiser (used by previews and internal construction).
+    init(
+        id: String,
+        username: String,
+        displayName: String?,
+        avatarUrl: String?,
+        bannerUrl: String?,
+        bio: String?,
+        status: UserStatus,
+        customStatus: String?,
+        bot: Bool,
+        createdAt: Date
+    ) {
+        self.id = id
+        self.username = username
+        self.displayName = displayName
+        self.avatarUrl = avatarUrl
+        self.bannerUrl = bannerUrl
+        self.bio = bio
+        self.status = status
+        self.customStatus = customStatus
+        self.bot = bot
+        self.createdAt = createdAt
+    }
+
+    // CodingKeys covers both the Fluxer API shape and internal/legacy shapes.
+    private enum CodingKeys: String, CodingKey {
+        case id, username, bot, bio, status
+        // Fluxer API field names (convertFromSnakeCase turns them into camelCase)
+        case globalName     // JSON: "global_name"
+        case avatar         // JSON: "avatar"  (hash, not URL)
+        case banner         // JSON: "banner"  (hash, not URL)
+        case customStatus   // JSON: "custom_status"
+        case createdAt      // JSON: "created_at"
+        // Fallback keys for instances that already return camelCase or full URLs
+        case displayName
+        case avatarUrl
+        case bannerUrl
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+
+        id       = try c.decode(String.self, forKey: .id)
+        username = try c.decode(String.self, forKey: .username)
+        bot      = (try c.decodeIfPresent(Bool.self, forKey: .bot)) ?? false
+
+        // Fluxer uses "global_name"; fall back to "displayName" for other servers.
+        displayName = try c.decodeIfPresent(String.self, forKey: .globalName)
+            ?? c.decodeIfPresent(String.self, forKey: .displayName)
+
+        // Fluxer returns "avatar" as a hash; other servers may use "avatarUrl".
+        avatarUrl = try c.decodeIfPresent(String.self, forKey: .avatar)
+            ?? c.decodeIfPresent(String.self, forKey: .avatarUrl)
+
+        bannerUrl = try c.decodeIfPresent(String.self, forKey: .banner)
+            ?? c.decodeIfPresent(String.self, forKey: .bannerUrl)
+
+        bio         = try c.decodeIfPresent(String.self, forKey: .bio)
+        customStatus = try c.decodeIfPresent(String.self, forKey: .customStatus)
+
+        // status and createdAt are not part of the Fluxer user REST response;
+        // default to sensible values so decoding never fails.
+        status    = (try c.decodeIfPresent(UserStatus.self, forKey: .status)) ?? .offline
+        createdAt = (try c.decodeIfPresent(Date.self,       forKey: .createdAt)) ?? Date()
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id,       forKey: .id)
+        try c.encode(username, forKey: .username)
+        try c.encode(bot,      forKey: .bot)
+        try c.encodeIfPresent(displayName,  forKey: .displayName)
+        try c.encodeIfPresent(avatarUrl,    forKey: .avatarUrl)
+        try c.encodeIfPresent(bannerUrl,    forKey: .bannerUrl)
+        try c.encodeIfPresent(bio,          forKey: .bio)
+        try c.encode(status,               forKey: .status)
+        try c.encodeIfPresent(customStatus, forKey: .customStatus)
+        try c.encode(createdAt,            forKey: .createdAt)
+    }
+
     static let preview = User(
         id: "1",
         username: "alice",
         displayName: "Alice Chen",
         avatarUrl: nil,
         bannerUrl: nil,
-        bio: "Building things with Swift 🚀",
+        bio: "Building things with Swift",
         status: .online,
         customStatus: "Coding...",
         bot: false,
@@ -37,11 +118,11 @@ struct User: Identifiable, Codable, Equatable {
 }
 
 enum UserStatus: String, Codable, CaseIterable {
-    case online = "Online"
-    case idle = "Idle"
-    case dnd = "Do Not Disturb"
-    case offline = "Offline"
-    case invisible = "Invisible"
+    case online = "online"
+    case idle = "idle"
+    case dnd = "dnd"
+    case offline = "offline"
+    case invisible = "invisible"
     
     var color: Color {
         switch self {
@@ -65,7 +146,7 @@ enum UserStatus: String, Codable, CaseIterable {
 }
 
 // MARK: - Server
-struct Server: Identifiable, Codable, Equatable {
+struct Server: Identifiable, Decodable, Equatable {
     let id: String
     let name: String
     let iconUrl: String?
@@ -74,6 +155,53 @@ struct Server: Identifiable, Codable, Equatable {
     let memberCount: Int
     let instance: String
     let channels: [Channel]
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, description, channels, instance
+        case iconUrl
+        case icon
+        case bannerUrl
+        case banner
+        case memberCount
+        case member_count
+    }
+
+    init(
+        id: String,
+        name: String,
+        iconUrl: String?,
+        bannerUrl: String?,
+        description: String?,
+        memberCount: Int,
+        instance: String,
+        channels: [Channel]
+    ) {
+        self.id = id
+        self.name = name
+        self.iconUrl = iconUrl
+        self.bannerUrl = bannerUrl
+        self.description = description
+        self.memberCount = memberCount
+        self.instance = instance
+        self.channels = channels
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? "Unknown Server"
+        iconUrl = try container.decodeIfPresent(String.self, forKey: .iconUrl)
+            ?? container.decodeIfPresent(String.self, forKey: .icon)
+        bannerUrl = try container.decodeIfPresent(String.self, forKey: .bannerUrl)
+            ?? container.decodeIfPresent(String.self, forKey: .banner)
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+        memberCount = try container.decodeIfPresent(Int.self, forKey: .memberCount)
+            ?? container.decodeIfPresent(Int.self, forKey: .member_count)
+            ?? 0
+        instance = try container.decodeIfPresent(String.self, forKey: .instance) ?? "web.fluxer.app"
+        channels = try container.decodeIfPresent([Channel].self, forKey: .channels) ?? []
+    }
     
     static let preview = Server(
         id: "1",
@@ -112,7 +240,7 @@ struct Server: Identifiable, Codable, Equatable {
 }
 
 // MARK: - Channel
-struct Channel: Identifiable, Codable, Equatable {
+struct Channel: Identifiable, Decodable, Equatable {
     let id: String
     let serverId: String
     let name: String
@@ -123,6 +251,91 @@ struct Channel: Identifiable, Codable, Equatable {
     let unreadCount: Int
     let mentionCount: Int
     let lastMessageAt: Date?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, topic, type, position
+        case serverId
+        case guildId
+        case guild_id
+        case parentId
+        case parent_id
+        case unreadCount
+        case unread_count
+        case mentionCount
+        case mention_count
+        case lastMessageAt
+        case last_message_at
+        case createdAt
+        case created_at
+    }
+
+    init(
+        id: String,
+        serverId: String,
+        name: String,
+        topic: String?,
+        type: ChannelType,
+        position: Int,
+        parentId: String?,
+        unreadCount: Int,
+        mentionCount: Int,
+        lastMessageAt: Date?
+    ) {
+        self.id = id
+        self.serverId = serverId
+        self.name = name
+        self.topic = topic
+        self.type = type
+        self.position = position
+        self.parentId = parentId
+        self.unreadCount = unreadCount
+        self.mentionCount = mentionCount
+        self.lastMessageAt = lastMessageAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        id = try container.decode(String.self, forKey: .id)
+        serverId = try container.decodeIfPresent(String.self, forKey: .serverId)
+            ?? container.decodeIfPresent(String.self, forKey: .guildId)
+            ?? container.decodeIfPresent(String.self, forKey: .guild_id)
+            ?? ""
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? "unknown"
+        topic = try container.decodeIfPresent(String.self, forKey: .topic)
+
+        if let typeString = try container.decodeIfPresent(String.self, forKey: .type),
+           let parsedType = ChannelType(rawValue: typeString) {
+            type = parsedType
+        } else if let typeInt = try container.decodeIfPresent(Int.self, forKey: .type) {
+            switch typeInt {
+            case 2:
+                type = .voice
+            case 4:
+                type = .category
+            case 5:
+                type = .announcement
+            default:
+                type = .text
+            }
+        } else {
+            type = .text
+        }
+
+        position = try container.decodeIfPresent(Int.self, forKey: .position) ?? 0
+        parentId = try container.decodeIfPresent(String.self, forKey: .parentId)
+            ?? container.decodeIfPresent(String.self, forKey: .parent_id)
+        unreadCount = try container.decodeIfPresent(Int.self, forKey: .unreadCount)
+            ?? container.decodeIfPresent(Int.self, forKey: .unread_count)
+            ?? 0
+        mentionCount = try container.decodeIfPresent(Int.self, forKey: .mentionCount)
+            ?? container.decodeIfPresent(Int.self, forKey: .mention_count)
+            ?? 0
+        lastMessageAt = try container.decodeIfPresent(Date.self, forKey: .lastMessageAt)
+            ?? container.decodeIfPresent(Date.self, forKey: .last_message_at)
+            ?? container.decodeIfPresent(Date.self, forKey: .createdAt)
+            ?? container.decodeIfPresent(Date.self, forKey: .created_at)
+    }
     
     enum ChannelType: String, Codable, CaseIterable {
         case text = "text"
@@ -219,9 +432,66 @@ struct Message: Identifiable, Codable, Equatable {
     let reactions: [Reaction]
     let attachments: [Attachment]
     let isPinned: Bool
-    
+
     var isEdited: Bool { editedTimestamp != nil }
     var isReply: Bool { replyToId != nil }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, author, content, timestamp, reactions, attachments
+        case channelId          // JSON: "channel_id"
+        case editedTimestamp    // JSON: "edited_timestamp"
+        case isPinned           // app-internal
+        case pinned             // JSON: "pinned" (Fluxer)
+        case replyToId          // app-internal
+        case messageReference   // JSON: "message_reference" (Fluxer)
+    }
+
+    init(
+        id: String, channelId: String, author: User, content: String,
+        timestamp: Date, editedTimestamp: Date?, replyToId: String?,
+        reactions: [Reaction], attachments: [Attachment], isPinned: Bool
+    ) {
+        self.id = id; self.channelId = channelId; self.author = author
+        self.content = content; self.timestamp = timestamp
+        self.editedTimestamp = editedTimestamp; self.replyToId = replyToId
+        self.reactions = reactions; self.attachments = attachments
+        self.isPinned = isPinned
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id        = try c.decode(String.self, forKey: .id)
+        channelId = try c.decodeIfPresent(String.self, forKey: .channelId) ?? ""
+        author    = try c.decode(User.self, forKey: .author)
+        content   = try c.decodeIfPresent(String.self, forKey: .content) ?? ""
+        timestamp = try c.decodeIfPresent(Date.self, forKey: .timestamp) ?? Date()
+        editedTimestamp = try c.decodeIfPresent(Date.self, forKey: .editedTimestamp)
+        reactions   = try c.decodeIfPresent([Reaction].self,    forKey: .reactions)   ?? []
+        attachments = try c.decodeIfPresent([Attachment].self,  forKey: .attachments) ?? []
+        isPinned    = try c.decodeIfPresent(Bool.self, forKey: .pinned)
+            ?? c.decodeIfPresent(Bool.self, forKey: .isPinned)
+            ?? false
+        // "message_reference.message_id" → replyToId
+        if let ref = try c.decodeIfPresent([String: String].self, forKey: .messageReference) {
+            replyToId = ref["message_id"]
+        } else {
+            replyToId = try c.decodeIfPresent(String.self, forKey: .replyToId)
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(channelId, forKey: .channelId)
+        try c.encode(author, forKey: .author)
+        try c.encode(content, forKey: .content)
+        try c.encode(timestamp, forKey: .timestamp)
+        try c.encodeIfPresent(editedTimestamp, forKey: .editedTimestamp)
+        try c.encodeIfPresent(replyToId, forKey: .replyToId)
+        try c.encode(reactions, forKey: .reactions)
+        try c.encode(attachments, forKey: .attachments)
+        try c.encode(isPinned, forKey: .isPinned)
+    }
     
     static let previewMessages = [
         Message(
@@ -295,6 +565,33 @@ struct Reaction: Codable, Equatable {
     let emoji: String
     let count: Int
     let me: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case emoji, count, me
+    }
+
+    // The Fluxer API returns emoji as an object: {name, id, animated}.
+    // We flatten that to a plain string (the Unicode char or name).
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+
+        if let emojiObj = try? c.decodeIfPresent([String: String].self, forKey: .emoji),
+           let name = emojiObj["name"] {
+            emoji = name
+        } else {
+            emoji = (try c.decodeIfPresent(String.self, forKey: .emoji)) ?? "?"
+        }
+
+        count = (try c.decodeIfPresent(Int.self, forKey: .count)) ?? 0
+        me    = (try c.decodeIfPresent(Bool.self, forKey: .me))    ?? false
+    }
+
+    // Convenience for previews / internal construction.
+    init(emoji: String, count: Int, me: Bool) {
+        self.emoji = emoji
+        self.count = count
+        self.me    = me
+    }
 }
 
 // MARK: - Attachment

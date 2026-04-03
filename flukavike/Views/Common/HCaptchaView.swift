@@ -11,6 +11,7 @@ import WebKit
 /// UIViewController that hosts the hCaptcha challenge without the external SDK.
 final class HCaptchaViewController: UIViewController {
     var siteKey: String?
+    var captchaProvider: String = "hcaptcha"
     var baseURL: URL?
     var hostDomain: String?
     var onToken: ((String) -> Void)?
@@ -30,6 +31,7 @@ final class HCaptchaViewController: UIViewController {
         print("[HCaptcha] baseURL: \(baseURL?.absoluteString ?? "nil")")
         print("[HCaptcha] hostDomain: \(hostDomain ?? "nil")")
         print("[HCaptcha] siteKey prefix: \(String(siteKey.prefix(8)))...")
+        print("[HCaptcha] provider: \(captchaProvider)")
         let contentController = WKUserContentController()
         contentController.add(WeakScriptMessageHandler(delegate: self), name: "hcaptchaToken")
         contentController.add(WeakScriptMessageHandler(delegate: self), name: "hcaptchaError")
@@ -55,7 +57,7 @@ final class HCaptchaViewController: UIViewController {
         ])
 
         self.webView = webView
-        webView.loadHTMLString(html(for: siteKey), baseURL: baseURL)
+        webView.loadHTMLString(html(for: siteKey, provider: captchaProvider), baseURL: baseURL)
     }
 
     deinit {
@@ -63,10 +65,22 @@ final class HCaptchaViewController: UIViewController {
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: "hcaptchaError")
     }
 
-    private func html(for siteKey: String) -> String {
+    private func normalizedProvider(_ provider: String) -> String {
+        let lower = provider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if lower.contains("turnstile") {
+            return "turnstile"
+        }
+        return "hcaptcha"
+    }
+
+    private func html(for siteKey: String, provider: String) -> String {
         let escapedSiteKey = siteKey
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
+        let provider = normalizedProvider(provider)
+        let scriptURL = provider == "turnstile"
+            ? "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+            : "https://js.hcaptcha.com/1/api.js?render=explicit"
 
         return """
         <!doctype html>
@@ -90,10 +104,16 @@ final class HCaptchaViewController: UIViewController {
                     display: flex;
                     align-items: center;
                     justify-content: center;
+                    min-height: 78px;
                 }
             </style>
-            <script src="https://js.hcaptcha.com/1/api.js?render=explicit" async defer></script>
+            <script src="\(scriptURL)" async defer></script>
             <script>
+                const provider = "\(provider)";
+                const siteKey = "\(escapedSiteKey)";
+                let renderAttempts = 0;
+                const maxRenderAttempts = 80;
+
                 function postError(message) {
                     window.webkit.messageHandlers.hcaptchaError.postMessage(message);
                 }
@@ -110,18 +130,48 @@ final class HCaptchaViewController: UIViewController {
                     postError("Verification expired, please try again");
                 }
 
-                function onLoad() {
-                    if (!window.hcaptcha) {
-                        postError("Failed to load challenge");
+                function renderCaptcha() {
+                    renderAttempts += 1;
+
+                    if (provider === "turnstile") {
+                        if (!window.turnstile || typeof window.turnstile.render !== "function") {
+                            if (renderAttempts < maxRenderAttempts) {
+                                setTimeout(renderCaptcha, 100);
+                                return;
+                            }
+                            postError("Failed to load captcha provider");
+                            return;
+                        }
+
+                        window.turnstile.render("#captcha-container", {
+                            sitekey: siteKey,
+                            callback: onSolve,
+                            "error-callback": onError,
+                            "expired-callback": onExpired,
+                            theme: "auto"
+                        });
+                        return;
+                    }
+
+                    if (!window.hcaptcha || typeof window.hcaptcha.render !== "function") {
+                        if (renderAttempts < maxRenderAttempts) {
+                            setTimeout(renderCaptcha, 100);
+                            return;
+                        }
+                        postError("Failed to load captcha provider");
                         return;
                     }
 
                     window.hcaptcha.render("captcha-container", {
-                        sitekey: "\(escapedSiteKey)",
+                        sitekey: siteKey,
                         callback: onSolve,
                         "error-callback": onError,
                         "expired-callback": onExpired
                     });
+                }
+
+                function onLoad() {
+                    renderCaptcha();
                 }
             </script>
         </head>
@@ -179,6 +229,7 @@ extension HCaptchaViewController: WKNavigationDelegate {
 
 struct HCaptchaView: UIViewControllerRepresentable {
     let siteKey: String
+    var provider: String = "hcaptcha"
     let baseURL: URL?
     let hostDomain: String?
     let onToken: (String) -> Void
@@ -187,6 +238,7 @@ struct HCaptchaView: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> UIViewController {
         let viewController = HCaptchaViewController()
         viewController.siteKey = siteKey
+        viewController.captchaProvider = provider
         viewController.baseURL = baseURL
         viewController.hostDomain = hostDomain
         viewController.onToken = onToken
@@ -207,6 +259,7 @@ struct HCaptchaSheetView: View {
     @Environment(\.dismiss) private var dismiss
     
     let siteKey: String
+    var provider: String = "hcaptcha"
     let onCompleted: (String) -> Void
     
     @State private var errorMessage: String?
@@ -231,6 +284,7 @@ struct HCaptchaSheetView: View {
                 
                 HCaptchaView(
                     siteKey: siteKey,
+                    provider: provider,
                     baseURL: captchaBaseURL(),
                     hostDomain: captchaHostDomain(),
                     onToken: { token in
@@ -306,6 +360,7 @@ struct HCaptchaWidgetCard: View {
     @Environment(\.colorScheme) private var colorScheme
 
     let siteKey: String
+    var provider: String? = nil
     let token: String?
     let onToken: (String) -> Void
     let onReset: () -> Void
@@ -342,6 +397,7 @@ struct HCaptchaWidgetCard: View {
 
             HCaptchaView(
                 siteKey: siteKey,
+                provider: resolvedProvider,
                 baseURL: captchaBaseURL(),
                 hostDomain: captchaHostDomain(),
                 onToken: { value in
@@ -388,6 +444,13 @@ struct HCaptchaWidgetCard: View {
         }
 
         return nil
+    }
+
+    private var resolvedProvider: String {
+        let raw = (provider ?? APIService.shared.captchaConfig?.provider ?? "hcaptcha")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return raw.contains("turnstile") ? "turnstile" : "hcaptcha"
     }
 
     private func captchaHostDomain() -> String? {

@@ -9,12 +9,39 @@ struct ChannelListView: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(\.colorScheme) private var colorScheme
     @Environment(AppState.self) private var appState
-    @State private var channels: [Channel] = Channel.previewChannels
+    @State private var servers: [Server] = []
+    @State private var channels: [Channel] = []
     @State private var selectedChannel: Channel?
+    @State private var isLoading: Bool = false
+    @State private var errorMessage: String?
+
+    private let apiService = APIService.shared
     
     var body: some View {
         NavigationStack {
             List {
+                if isLoading && channels.isEmpty {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                            .padding(.vertical, 20)
+                        Spacer()
+                    }
+                    .listRowBackground(themeManager.backgroundPrimary(colorScheme))
+                    .listRowSeparator(.hidden)
+                }
+
+                if let errorMessage, channels.isEmpty {
+                    Text(errorMessage)
+                        .font(.system(size: 14))
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .listRowBackground(themeManager.backgroundPrimary(colorScheme))
+                        .listRowSeparator(.hidden)
+                }
+
                 ForEach(groupedChannels.keys.sorted(), id: \.self) { category in
                     Section {
                         ForEach(groupedChannels[category] ?? []) { channel in
@@ -41,12 +68,43 @@ struct ChannelListView: View {
             .background(themeManager.backgroundPrimary(colorScheme))
             .navigationTitle("Channels")
             .navigationBarTitleDisplayMode(.large)
+            .task {
+                if servers.isEmpty {
+                    await loadServersAndChannels()
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
+                        if !servers.isEmpty {
+                            Section("Servers") {
+                                ForEach(servers) { server in
+                                    Button {
+                                        appState.selectedServer = server
+                                        Task {
+                                            await loadChannels(for: server)
+                                        }
+                                    } label: {
+                                        if appState.selectedServer?.id == server.id {
+                                            Label(server.name, systemImage: "checkmark")
+                                        } else {
+                                            Text(server.name)
+                                        }
+                                    }
+                                }
+                            }
+                            Divider()
+                        }
+
+                        Button("Refresh") {
+                            Task {
+                                await loadServersAndChannels()
+                            }
+                        }
+
+                        Divider()
                         Button("Create Channel") {}
                         Button("Create Category") {}
-                        Divider()
                         Button("Channel Settings") {}
                     } label: {
                         Image(systemName: "plus.circle")
@@ -66,6 +124,63 @@ struct ChannelListView: View {
     private var groupedChannels: [String: [Channel]] {
         Dictionary(grouping: channels) { channel in
             channel.parentId ?? "TEXT CHANNELS"
+        }
+    }
+
+    private func loadServersAndChannels() async {
+        await MainActor.run {
+            isLoading = true
+            errorMessage = nil
+        }
+
+        do {
+            let fetchedServers = try await apiService.getUserGuilds()
+            let server = appState.selectedServer.flatMap { current in
+                fetchedServers.first { $0.id == current.id }
+            } ?? fetchedServers.first
+
+            await MainActor.run {
+                servers = fetchedServers
+                appState.selectedServer = server
+            }
+
+            if let server {
+                await loadChannels(for: server)
+            } else {
+                await MainActor.run {
+                    channels = []
+                    isLoading = false
+                    errorMessage = "No servers available for this account."
+                }
+            }
+        } catch {
+            await MainActor.run {
+                channels = []
+                isLoading = false
+                errorMessage = "Failed to load servers. Please try again."
+            }
+        }
+    }
+
+    private func loadChannels(for server: Server) async {
+        await MainActor.run {
+            isLoading = true
+            errorMessage = nil
+        }
+
+        do {
+            let fetchedChannels = try await apiService.getGuildChannels(guildId: server.id)
+            await MainActor.run {
+                channels = fetchedChannels.sorted { $0.position < $1.position }
+                appState.selectedServer = server
+                isLoading = false
+            }
+        } catch {
+            await MainActor.run {
+                channels = []
+                isLoading = false
+                errorMessage = "Failed to load channels for \(server.name)."
+            }
         }
     }
 }

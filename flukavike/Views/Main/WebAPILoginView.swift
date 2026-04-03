@@ -17,9 +17,10 @@ struct WebAPILoginView: View {
     @State private var errorMessage: String?
     
     // Captcha state
-    @State private var showCaptcha: Bool = false
+    @State private var showCaptchaSheet: Bool = false
     @State private var captchaToken: String?
     @State private var captchaSiteKey: String = ""
+    @State private var captchaProvider: String = "hcaptcha"
     
     var body: some View {
         NavigationStack {
@@ -96,28 +97,20 @@ struct WebAPILoginView: View {
                         }
                     }
                     .padding(.horizontal, 20)
-                    
-                    // Captcha Widget (shown when required)
-                    if showCaptcha && !captchaSiteKey.isEmpty {
-                        VStack(spacing: 12) {
-                            Text("Complete the verification to continue")
-                                .font(.system(size: 14))
-                                .foregroundStyle(themeManager.textSecondary(colorScheme))
-                            
-                            HCaptchaWidgetCard(
-                                siteKey: captchaSiteKey,
-                                token: captchaToken,
-                                onToken: { token in
-                                    captchaToken = token
-                                    errorMessage = nil
-                                    // Auto-submit when captcha is completed
-                                    signIn()
-                                },
-                                onReset: {
-                                    captchaToken = nil
-                                }
-                            )
-                        }
+
+                    if showCaptchaSheet && !captchaSiteKey.isEmpty {
+                        HCaptchaWidgetCard(
+                            siteKey: captchaSiteKey,
+                            provider: captchaProvider,
+                            token: captchaToken,
+                            onToken: { token in
+                                captchaToken = token
+                                errorMessage = "Verification completed."
+                            },
+                            onReset: {
+                                captchaToken = nil
+                            }
+                        )
                         .padding(.horizontal, 20)
                     }
                     
@@ -137,10 +130,10 @@ struct WebAPILoginView: View {
                         .padding(.vertical, 16)
                         .background(
                             RoundedRectangle(cornerRadius: 12)
-                                .fill(canSignIn ? themeManager.accentColor.color : themeManager.accentColor.color.opacity(0.5))
+                                .fill(canSignIn && (!showCaptchaSheet || captchaToken != nil) ? themeManager.accentColor.color : themeManager.accentColor.color.opacity(0.5))
                         )
                     }
-                    .disabled(!canSignIn || isLoading || (showCaptcha && captchaToken == nil))
+                    .disabled(!canSignIn || isLoading || (showCaptchaSheet && captchaToken == nil))
                     .padding(.horizontal, 20)
                     
                     Spacer()
@@ -190,8 +183,9 @@ struct WebAPILoginView: View {
                 
                 // Discover endpoints first
                 try await APIService.shared.discoverInstance(instance)
-                
-                // Attempt login with captcha token if available
+
+                // Attempt login. If captcha is required, the error will be caught
+                // and the captcha challenge will be displayed.
                 let response = try await AuthService.shared.login(
                     instance: instance,
                     login: username,
@@ -211,6 +205,8 @@ struct WebAPILoginView: View {
                     WebAuthService.shared.setSession(session)
                     appState.currentUser = response.user
                     isLoading = false
+                    captchaToken = nil
+                    showCaptchaSheet = false
                     dismiss()
                 }
                 
@@ -218,14 +214,16 @@ struct WebAPILoginView: View {
                 await connectWebSocket(token: response.token)
                 
             } catch let error as APIError {
+                print("[Login] APIError: \(error)")
                 await MainActor.run {
                     isLoading = false
                     handleAPIError(error)
                 }
             } catch {
+                print("[Login] Unexpected error: \(error)")
                 await MainActor.run {
                     isLoading = false
-                    errorMessage = "Sign in failed. Please try again."
+                    errorMessage = "Login could not be completed: \(error.localizedDescription)"
                 }
             }
         }
@@ -233,31 +231,101 @@ struct WebAPILoginView: View {
     
     private func handleAPIError(_ error: APIError) {
         switch error {
-        case .captchaRequired(let sitekey, _):
-            // Show captcha challenge
-            showCaptcha = true
-            if let sitekey = sitekey, !sitekey.isEmpty {
-                captchaSiteKey = sitekey
-            } else if let config = APIService.shared.captchaConfig {
-                captchaSiteKey = config.sitekey
+        case .captchaRequired(let sitekey, let service):
+            startCaptchaChallenge(sitekey: sitekey, provider: service)
+            errorMessage = "Complete verification to continue."
+
+        case .mfaRequired(_, let allowedMethods):
+            showCaptchaSheet = false
+            captchaToken = nil
+            let methods = allowedMethods.joined(separator: ", ")
+            if methods.isEmpty {
+                errorMessage = "This account requires multi-factor authentication."
             } else {
-                captchaSiteKey = APIService.fallbackHCaptchaSiteKey
+                errorMessage = "This account requires multi-factor authentication (\(methods))."
             }
-            errorMessage = "Please complete the verification below."
+
+        case .ipAuthorizationRequired(_, let email, _):
+            showCaptchaSheet = false
+            captchaToken = nil
+            if let email, !email.isEmpty {
+                errorMessage = "Check \(email) and approve this login attempt."
+            } else {
+                errorMessage = "Approve this login attempt from your email, then try again."
+            }
             
         case .unauthorized:
             errorMessage = "Invalid username or password"
             // Reset captcha on auth failure
             captchaToken = nil
-            
+            showCaptchaSheet = false
+
         case .invalidURL:
             errorMessage = "Could not connect to server"
-            
+
+        case .rateLimited:
+            showCaptchaSheet = false
+            captchaToken = nil
+            errorMessage = "Too many login attempts. Please wait a few minutes and try again."
+
+        case .forbidden:
+            showCaptchaSheet = false
+            captchaToken = nil
+            errorMessage = "Access denied. Please try again or contact support."
+
         case .serverError(_, let message):
-            errorMessage = message ?? "Server error"
-            
+            let lower = message?.lowercased() ?? ""
+            let normalized = lower.filter { $0.isLetter || $0.isNumber }
+            if lower.contains("captcha") || lower.contains("api error 7") || normalized.contains("apierror7") {
+                startCaptchaChallenge(sitekey: nil, provider: nil)
+                errorMessage = "Complete verification to continue."
+            } else {
+                errorMessage = message ?? "Server error"
+                showCaptchaSheet = false
+            }
+
+        case .decodingError(let underlying):
+            showCaptchaSheet = false
+            captchaToken = nil
+            errorMessage = "Unexpected response: \(underlying.localizedDescription)"
+
+        case .notFound:
+            showCaptchaSheet = false
+            captchaToken = nil
+            errorMessage = "API endpoint not found. Check that the server is reachable. (URL: \(APIService.shared.apiBaseURL))"
+
+        case .invalidResponse:
+            showCaptchaSheet = false
+            captchaToken = nil
+            errorMessage = "No response from server. Check your network connection."
+
         default:
-            errorMessage = "Sign in failed: \(error.localizedDescription)"
+            showCaptchaSheet = false
+            errorMessage = "Login could not be completed. Please try again."
+        }
+    }
+
+    private func startCaptchaChallenge(sitekey: String?, provider: String?) {
+        captchaToken = nil
+
+        if let sitekey, !sitekey.isEmpty {
+            captchaSiteKey = sitekey
+        } else if let config = APIService.shared.captchaConfig, !config.sitekey.isEmpty {
+            captchaSiteKey = config.sitekey
+        } else {
+            captchaSiteKey = APIService.fallbackHCaptchaSiteKey
+        }
+
+        let resolvedProvider = (provider
+            ?? APIService.shared.captchaConfig?.provider
+            ?? "hcaptcha")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        captchaProvider = resolvedProvider.contains("turnstile") ? "turnstile" : "hcaptcha"
+
+        showCaptchaSheet = !captchaSiteKey.isEmpty
+        if !showCaptchaSheet {
+            errorMessage = "Verification is temporarily unavailable. Please try again."
         }
     }
     

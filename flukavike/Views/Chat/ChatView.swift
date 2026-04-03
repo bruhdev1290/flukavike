@@ -19,6 +19,7 @@ struct ChatView: View {
     @State private var isTyping: Bool = false
     @State private var isLoading: Bool = false
     @State private var isSending: Bool = false
+    @State private var errorMessage: String?
     @State private var typingUsers: [String: Date] = [:]
     @State private var isRecordingVoice: Bool = false
     @State private var voiceRecording: VoiceMessageRecording?
@@ -39,6 +40,14 @@ struct ChatView: View {
                         if isLoading && messages.isEmpty {
                             ProgressView()
                                 .padding(.vertical, 32)
+                        }
+
+                        if let errorMessage, messages.isEmpty {
+                            Text(errorMessage)
+                                .font(.system(size: 14))
+                                .foregroundStyle(.red)
+                                .multilineTextAlignment(.center)
+                                .padding(.vertical, 24)
                         }
                         
                         // Date Header
@@ -133,6 +142,7 @@ struct ChatView: View {
     private func loadMessages() {
         Task {
             isLoading = true
+            errorMessage = nil
             do {
                 let fetched = try await apiService.getMessages(channelId: channel.id, limit: 50)
                 await MainActor.run {
@@ -142,8 +152,8 @@ struct ChatView: View {
             } catch {
                 await MainActor.run {
                     self.isLoading = false
-                    // Fallback to preview messages for mockup
-                    self.messages = Message.previewMessages
+                    self.messages = []
+                    self.errorMessage = "Failed to load message history."
                 }
             }
         }

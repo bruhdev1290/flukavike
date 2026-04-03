@@ -110,15 +110,6 @@ struct OnboardingView: View {
                                 .padding(.vertical, 12)
                         }
                     }
-                    
-                    if currentPage == pages.count - 1 {
-                        Button(action: { showLogin = true }) {
-                            Text("I already have an account")
-                                .font(.system(size: 17, weight: .medium))
-                                .foregroundStyle(themeManager.accentColor.color)
-                                .padding(.vertical, 12)
-                        }
-                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 34)
@@ -200,8 +191,10 @@ struct LoginView: View {
     @State private var errorMessage: String? = nil
     @State private var showRegistration: Bool = false
     @State private var showQRCodeHelp: Bool = false
+    @State private var showCaptchaSheet: Bool = false
     @State private var captchaToken: String? = nil
     @State private var captchaSiteKey: String = ""
+    @State private var captchaProvider: String = "hcaptcha"
     
     let popularInstances = [
         "web.fluxer.app",
@@ -347,20 +340,21 @@ struct LoginView: View {
                             .frame(maxWidth: .infinity)
                     }
 
-                    if !captchaSiteKey.isEmpty {
+                    if showCaptchaSheet && !captchaSiteKey.isEmpty {
                         HCaptchaWidgetCard(
                             siteKey: captchaSiteKey,
+                            provider: captchaProvider,
                             token: captchaToken,
                             onToken: { token in
                                 captchaToken = token
-                                errorMessage = nil
+                                errorMessage = "Verification completed."
                             },
                             onReset: {
                                 captchaToken = nil
                             }
                         )
                     }
-                    
+
                     // Sign In Button
                     Button(action: signIn) {
                         HStack {
@@ -377,10 +371,10 @@ struct LoginView: View {
                         .padding(.vertical, 16)
                         .background(
                             RoundedRectangle(cornerRadius: 12)
-                                .fill(canSignIn ? themeManager.accentColor.color : themeManager.accentColor.color.opacity(0.5))
+                                .fill(canSignIn && (!showCaptchaSheet || captchaToken != nil) ? themeManager.accentColor.color : themeManager.accentColor.color.opacity(0.5))
                         )
                     }
-                    .disabled(!canSignIn || isLoading)
+                    .disabled(!canSignIn || isLoading || (showCaptchaSheet && captchaToken == nil))
                     
                     // Alternative Options
                     VStack(spacing: 16) {
@@ -441,7 +435,6 @@ struct LoginView: View {
         !instance.isEmpty
             && !username.isEmpty
             && !password.isEmpty
-            && (captchaSiteKey.isEmpty || captchaToken != nil)
     }
     
     private func signIn() {
@@ -453,16 +446,6 @@ struct LoginView: View {
                 // Discover instance to check for captcha requirement
                 try await APIService.shared.discoverInstance(instance)
                 
-                // If captcha is required and we don't have a token yet, show the challenge
-                if let config = APIService.shared.captchaConfig, captchaToken == nil {
-                    await MainActor.run {
-                        isLoading = false
-                        captchaSiteKey = config.sitekey
-                        errorMessage = "Complete the hCaptcha verification to continue."
-                    }
-                    return
-                }
-                
                 let response = try await AuthService.shared.login(
                     instance: instance,
                     login: username,
@@ -473,6 +456,7 @@ struct LoginView: View {
                 await MainActor.run {
                     isLoading = false
                     captchaToken = nil
+                    showCaptchaSheet = false
                     appState.currentUser = response.user
                     dismiss()
                 }
@@ -496,33 +480,52 @@ struct LoginView: View {
                     isLoading = false
                     let normalizedInstance = APIService.normalizeInstance(instance)
                     switch error {
-                    case .captchaRequired(let sitekey, _):
-                        // Server requires captcha — show the challenge
+                    case .captchaRequired(let sitekey, let service):
+                        startCaptchaChallenge(sitekey: sitekey, provider: service)
+                        errorMessage = "Complete verification to continue."
+                    case .mfaRequired(_, let allowedMethods):
                         captchaToken = nil
-                        if let sitekey, !sitekey.isEmpty {
-                            captchaSiteKey = sitekey
-                        } else if let config = APIService.shared.captchaConfig {
-                            captchaSiteKey = config.sitekey
-                        }
-                        if !captchaSiteKey.isEmpty {
-                            errorMessage = "Complete the hCaptcha verification to continue."
+                        showCaptchaSheet = false
+                        let methods = allowedMethods.joined(separator: ", ")
+                        if methods.isEmpty {
+                            errorMessage = "This account requires multi-factor authentication."
                         } else {
-                            errorMessage = "Captcha required but no sitekey available."
+                            errorMessage = "This account requires multi-factor authentication (\(methods))."
+                        }
+                    case .ipAuthorizationRequired(_, let email, _):
+                        captchaToken = nil
+                        showCaptchaSheet = false
+                        if let email, !email.isEmpty {
+                            errorMessage = "Check \(email) and approve this login attempt."
+                        } else {
+                            errorMessage = "Approve this login attempt from your email, then try again."
                         }
                     case .unauthorized:
                         captchaToken = nil
+                        showCaptchaSheet = false
                         errorMessage = "Invalid username or password"
                     case .invalidURL:
                         captchaToken = nil
+                        showCaptchaSheet = false
                         errorMessage = "Could not connect to \(instance). Check the instance URL."
                     case .forbidden(let message):
                         captchaToken = nil
+                        showCaptchaSheet = false
                         errorMessage = message ?? "Connection forbidden by \(normalizedInstance)."
                     case .serverError(_, let message):
                         captchaToken = nil
-                        errorMessage = message ?? "Server error. Please try again."
+                        let lower = message?.lowercased() ?? ""
+                        let normalized = lower.filter { $0.isLetter || $0.isNumber }
+                        if lower.contains("captcha") || lower.contains("api error 7") || normalized.contains("apierror7") {
+                            startCaptchaChallenge(sitekey: nil, provider: nil)
+                            errorMessage = "Complete verification to continue."
+                        } else {
+                            showCaptchaSheet = false
+                            errorMessage = message ?? "Server error. Please try again."
+                        }
                     default:
                         captchaToken = nil
+                        showCaptchaSheet = false
                         errorMessage = "Connection failed: \(error)"
                     }
                 }
@@ -530,9 +533,34 @@ struct LoginView: View {
                 await MainActor.run {
                     isLoading = false
                     captchaToken = nil
+                    showCaptchaSheet = false
                     errorMessage = "Could not connect to \(instance). Check the instance URL."
                 }
             }
+        }
+    }
+
+    private func startCaptchaChallenge(sitekey: String?, provider: String?) {
+        captchaToken = nil
+
+        if let sitekey, !sitekey.isEmpty {
+            captchaSiteKey = sitekey
+        } else if let config = APIService.shared.captchaConfig, !config.sitekey.isEmpty {
+            captchaSiteKey = config.sitekey
+        } else {
+            captchaSiteKey = APIService.fallbackHCaptchaSiteKey
+        }
+
+        let resolvedProvider = (provider
+            ?? APIService.shared.captchaConfig?.provider
+            ?? "hcaptcha")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        captchaProvider = resolvedProvider.contains("turnstile") ? "turnstile" : "hcaptcha"
+
+        showCaptchaSheet = !captchaSiteKey.isEmpty
+        if !showCaptchaSheet {
+            errorMessage = "Verification is temporarily unavailable. Please try again."
         }
     }
 }

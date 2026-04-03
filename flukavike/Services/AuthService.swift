@@ -125,7 +125,7 @@ enum AuthError: Error {
 
 struct LoginResponse: Codable {
     let token: String
-    let refreshToken: String
+    let refreshToken: String?
     let user: User
 }
 

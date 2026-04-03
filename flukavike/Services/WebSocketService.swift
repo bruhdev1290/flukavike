@@ -514,7 +514,7 @@ extension WebSocketService: URLSessionWebSocketDelegate {
 
 // MARK: - Gateway Models
 
-struct GatewayReady: Codable {
+struct GatewayReady: Decodable {
     let version: Int
     let user: User
     let guilds: [Server]
