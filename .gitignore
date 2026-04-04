@@ -1,4 +1,61 @@
-.build/
-*.xcodeproj/
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Xcode - User-specific
+xcuserdata/
+*.xcuserstate
+*.xcuserdatad
+*.xccheckout
+*.moved-aside
+*.xcscmblueprint
+*.xcscheme
+
+# Xcode - Build artifacts
+build/
 DerivedData/
+.build/
 *.app
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Xcode - Playgrounds
+timeline.xctimeline
+playground.xcworkspace
+
+# CocoaPods
+Pods/
+!Podfile
+!Podfile.lock
+
+# Carthage
+Carthage/Build/
+Carthage/Checkouts/
+
+# Swift Package Manager
+.build/
+Package.resolved
+
+# fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+.vscode/
+buildServer.json
+
+# Environment
+.env
+.env.local
+
+# Misc
+*.log
+*.tmp
