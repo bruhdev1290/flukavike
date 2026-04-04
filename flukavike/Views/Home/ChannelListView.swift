@@ -42,9 +42,9 @@ struct ChannelListView: View {
                         .listRowSeparator(.hidden)
                 }
 
-                ForEach(groupedChannels.keys.sorted(), id: \.self) { category in
+                ForEach(sortedCategoryKeys, id: \.self) { key in
                     Section {
-                        ForEach(groupedChannels[category] ?? []) { channel in
+                        ForEach(groupedChannels[key] ?? []) { channel in
                             ChannelRow(
                                 channel: channel,
                                 isSelected: selectedChannel?.id == channel.id
@@ -58,7 +58,7 @@ struct ChannelListView: View {
                             }
                         }
                     } header: {
-                        Text(category.uppercased())
+                        Text(categoryName(for: key))
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(themeManager.textTertiary(colorScheme))
                     }
@@ -121,10 +121,39 @@ struct ChannelListView: View {
         }
     }
     
+    /// Category channels keyed by ID for header name lookup
+    private var categoriesById: [String: Channel] {
+        Dictionary(uniqueKeysWithValues: channels
+            .filter { $0.type == .category }
+            .map { ($0.id, $0) }
+        )
+    }
+
+    /// Non-category channels grouped by their parent category ID
     private var groupedChannels: [String: [Channel]] {
-        Dictionary(grouping: channels) { channel in
-            channel.parentId ?? "TEXT CHANNELS"
+        let displayChannels = channels.filter { $0.type != .category }
+        return Dictionary(grouping: displayChannels) { channel in
+            channel.parentId ?? ""
         }
+    }
+
+    /// Sorted category keys: uncategorized first, then categories in position order
+    private var sortedCategoryKeys: [String] {
+        var keys = Array(groupedChannels.keys)
+        keys.sort { a, b in
+            if a.isEmpty { return true }
+            if b.isEmpty { return false }
+            let posA = categoriesById[a]?.position ?? Int.max
+            let posB = categoriesById[b]?.position ?? Int.max
+            return posA < posB
+        }
+        return keys
+    }
+
+    /// Display name for a category key
+    private func categoryName(for key: String) -> String {
+        if key.isEmpty { return "CHANNELS" }
+        return categoriesById[key]?.name.uppercased() ?? key
     }
 
     private func loadServersAndChannels() async {
@@ -166,6 +195,18 @@ struct ChannelListView: View {
         await MainActor.run {
             isLoading = true
             errorMessage = nil
+        }
+
+        // Channels are embedded in the guild object from getUserGuilds.
+        // Only fall back to the separate endpoint if the guild had none.
+        let embedded = server.channels
+        if !embedded.isEmpty {
+            await MainActor.run {
+                channels = embedded.sorted { $0.position < $1.position }
+                appState.selectedServer = server
+                isLoading = false
+            }
+            return
         }
 
         do {

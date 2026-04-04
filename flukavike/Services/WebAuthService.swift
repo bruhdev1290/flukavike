@@ -211,10 +211,9 @@ class WebAuthService: NSObject {
     func setSession(_ session: WebSession) {
         currentSession = session
         saveSession()
-        
-        // Update API service
+
+        // Update API service token only — URLs were already set by discoverInstance
         APIService.shared.setAuthToken(session.token)
-        APIService.shared.setInstance(Self.webInstanceHost)
     }
     
     /// Clear the current session (logout)
@@ -223,10 +222,13 @@ class WebAuthService: NSObject {
         Task {
             _ = try? await APIService.shared.logout()
         }
-        
+        clearSession()
+    }
+
+    /// Clear session locally without hitting the API (used on 401 to avoid loops)
+    func clearSession() {
         currentSession = nil
         UserDefaults.standard.removeObject(forKey: "web_auth_session")
-        
         APIService.shared.setAuthToken("")
         WebSocketService.shared.disconnect()
     }
@@ -265,10 +267,9 @@ class WebAuthService: NSObject {
         }
         
         currentSession = session
-        
-        // Restore API service state
+
+        // Restore API service token — base URLs remain as initialized (api.fluxer.app/v1)
         APIService.shared.setAuthToken(session.token)
-        APIService.shared.setInstance(Self.webInstanceHost)
     }
     
     // MARK: - Migration

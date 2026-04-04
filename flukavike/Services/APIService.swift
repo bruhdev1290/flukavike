@@ -603,6 +603,8 @@ class APIService {
             print("[API] Error 400: \(rawBody)")
             throw APIError.serverError(statusCode: 400, message: message)
         case 401:
+            // Session expired or revoked — clear stored session so UI redirects to login
+            await MainActor.run { WebAuthService.shared.clearSession() }
             throw APIError.unauthorized
         case 403:
             print("[API] Error 403: \(rawBody)")

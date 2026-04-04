@@ -8,9 +8,12 @@ import SwiftUI
 struct HomeView: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(\.colorScheme) private var colorScheme
-    @State private var servers: [Server] = Server.previewServers
+    @Environment(AppState.self) private var appState
+    @State private var servers: [Server] = []
     @State private var selectedServer: Server?
-    
+
+    private let apiService = APIService.shared
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -32,6 +35,11 @@ struct HomeView: View {
             .background(themeManager.backgroundPrimary(colorScheme))
             .navigationTitle("Flukavike")
             .navigationBarTitleDisplayMode(.large)
+            .task {
+                if servers.isEmpty {
+                    await loadServers()
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 16) {
@@ -52,6 +60,22 @@ struct HomeView: View {
         }
     }
     
+    // MARK: - Data Loading
+
+    private func loadServers() async {
+        do {
+            let fetched = try await apiService.getUserGuilds()
+            await MainActor.run {
+                servers = fetched
+                if selectedServer == nil {
+                    selectedServer = appState.selectedServer ?? fetched.first
+                }
+            }
+        } catch {
+            // Silent failure — channels tab handles auth errors
+        }
+    }
+
     // MARK: - Server Pills Section
     private var serverPillsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
