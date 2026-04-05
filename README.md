@@ -180,6 +180,29 @@ enum AccentColor: String, CaseIterable, Identifiable {
 
 ---
 
+## ⚠️ Critical: Channel Loading Architecture
+
+**Do not change how channels are fetched without reading this first.**
+
+Fluxer does **not** return channel data from the REST endpoint `GET /guilds/{id}/channels` — that endpoint always returns an empty array `[]` for regular user tokens, regardless of guild membership or permissions.
+
+Channels are delivered exclusively through the **WebSocket Gateway READY event**, the same pattern Discord uses for large guilds. The READY payload includes a `guilds` array where each guild object contains its full channel list.
+
+The channel loading flow is:
+
+1. `FluxerApp` connects the WebSocket on login
+2. When the Gateway sends `READY`, `onReady` stores `ready.guilds` into `AppState.gatewayGuilds`
+3. `HomeView.loadChannels(for:)` checks `appState.gatewayGuilds` first and uses the channels from there
+4. `HomeView` has an `.onChange(of: appState.gatewayGuilds)` observer that reloads channels if the READY event arrives after the initial server list load
+5. The REST call at the bottom of `loadChannels` is a last-resort fallback only (it will return `[]` on Fluxer but may work on other compatible instances)
+
+**Files involved:**
+- `FluxerApp.swift` — `webSocketService.onReady` callback
+- `Stores/ThemeManager.swift` — `AppState.gatewayGuilds`
+- `Views/Home/HomeView.swift` — `loadChannels(for:)` and `.onChange(of: appState.gatewayGuilds)`
+
+---
+
 ## 🛠 Roadmap
 
 ### Phase 1: Core (Current)
@@ -193,6 +216,7 @@ enum AccentColor: String, CaseIterable, Identifiable {
 - [x] WebSocket connection
 - [x] Real-time messaging
 - [x] Authentication
+- [x] Gateway-based channel loading
 
 ### Phase 3: Polish
 - [x] Custom app icons

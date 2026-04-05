@@ -136,8 +136,15 @@ struct FluxerApp: App {
             }
         }
         
+        // ⚠️ WARNING — DO NOT MODIFY THIS BLOCK WITHOUT READING THE README FIRST.
+        // Fluxer does NOT serve channels via REST (GET /guilds/{id}/channels returns []).
+        // Channels arrive exclusively in the Gateway READY payload (ready.guilds[n].channels).
+        // Removing or bypassing this assignment will break channel loading for every server.
         webSocketService.onReady = { ready in
             appState.currentUser = ready.user
+            if !ready.guilds.isEmpty {
+                appState.gatewayGuilds = ready.guilds
+            }
         }
         
         webSocketService.onMessageCreate = { message in

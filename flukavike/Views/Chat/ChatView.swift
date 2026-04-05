@@ -1,6 +1,6 @@
 //
 //  ChatView.swift
-//  Chat interface
+//  Discord-style chat interface
 //
 
 import SwiftUI
@@ -59,18 +59,23 @@ struct ChatView: View {
                         }
                         
                         ForEach(messages) { message in
-                            MessageBubble(message: message)
+                            DiscordMessageBubble(message: message)
                                 .id(message.id)
                         }
                         
                         // Typing Indicator
                         if !activeTypingUsers.isEmpty {
-                            TypingIndicator(users: activeTypingUsers)
+                            DiscordTypingIndicator(users: activeTypingUsers)
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 8)
                         }
+                        
+                        // Bottom spacing
+                        Color.clear
+                            .frame(height: 8)
+                            .id("bottom")
                     }
-                    .padding(.horizontal, 8)
+                    .padding(.horizontal, 12)
                 }
                 .onAppear {
                     loadMessages()
@@ -86,7 +91,7 @@ struct ChatView: View {
             }
             
             // Input Area
-            MessageInputView(
+            DiscordInputView(
                 text: $messageText,
                 isTyping: $isTyping,
                 isSending: $isSending,
@@ -114,14 +119,14 @@ struct ChatView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 16) {
                     Button(action: {}) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 17))
+                        Image(systemName: "star")
+                            .font(.system(size: 20))
                             .foregroundStyle(themeManager.textPrimary(colorScheme))
                     }
                     
                     Button(action: {}) {
-                        Image(systemName: "person.2")
-                            .font(.system(size: 17))
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 20))
                             .foregroundStyle(themeManager.textPrimary(colorScheme))
                     }
                 }
@@ -134,7 +139,7 @@ struct ChatView: View {
         let threshold: TimeInterval = 10
         return typingUsers
             .filter { $0.value.addingTimeInterval(threshold) > now }
-            .compactMap { _ in User.preview } // In real app, look up users by ID
+            .compactMap { _ in User.preview }
     }
     
     // MARK: - Messages
@@ -175,7 +180,6 @@ struct ChatView: View {
             } catch {
                 await MainActor.run {
                     self.isSending = false
-                    // Restore text on failure
                     self.messageText = content
                 }
             }
@@ -191,14 +195,12 @@ struct ChatView: View {
     private func handleVoiceRecording(isRecording: Bool) {
         Task {
             if isRecording {
-                // Start recording
                 do {
                     _ = try await audioRecorder.startRecording()
                 } catch {
                     print("Failed to start recording: \(error)")
                 }
             } else {
-                // Stop recording
                 if let recording = audioRecorder.stopRecording() {
                     voiceRecording = recording
                 }
@@ -234,7 +236,6 @@ struct ChatView: View {
                     self.messages.append(message)
                     self.isSending = false
                 }
-                // Clean up the temporary file
                 audioRecorder.deleteRecording(at: url)
             } catch {
                 await MainActor.run {
@@ -254,7 +255,6 @@ struct ChatView: View {
                 if !messages.contains(where: { $0.id == message.id }) {
                     messages.append(message)
                 }
-                // Remove typing indicator for this user
                 typingUsers.removeValue(forKey: message.author.id)
             }
         }
@@ -278,7 +278,6 @@ struct ChatView: View {
             guard event.channelId == channel.id else { return }
             DispatchQueue.main.async {
                 typingUsers[event.userId] = Date()
-                // Auto-clear after 10 seconds
                 DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
                     typingUsers.removeValue(forKey: event.userId)
                 }
@@ -294,16 +293,14 @@ struct ChatView: View {
     }
     
     private func scrollToBottom(proxy: ScrollViewProxy) {
-        if let lastMessage = messages.last {
-            withAnimation {
-                proxy.scrollTo(lastMessage.id, anchor: .bottom)
-            }
+        withAnimation {
+            proxy.scrollTo("bottom", anchor: .bottom)
         }
     }
 }
 
-// MARK: - Message Bubble
-struct MessageBubble: View {
+// MARK: - Discord Message Bubble
+struct DiscordMessageBubble: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(\.colorScheme) private var colorScheme
     let message: Message
@@ -313,18 +310,16 @@ struct MessageBubble: View {
         HStack(alignment: .top, spacing: 12) {
             // Avatar
             AvatarView(user: message.author, size: 40)
-                .onTapGesture {
-                    // Show user profile
-                }
+                .onTapGesture {}
             
             VStack(alignment: .leading, spacing: 4) {
-                // Header
+                // Header - Name and timestamp inline
                 HStack(spacing: 8) {
                     Text(message.author.formattedName)
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(themeManager.accentColor.color)
+                        .foregroundStyle(themeManager.textPrimary(colorScheme))
                     
-                    Text(message.timestamp, style: .time)
+                    Text(formattedTimestamp(message.timestamp))
                         .font(.system(size: 12))
                         .foregroundStyle(themeManager.textTertiary(colorScheme))
                     
@@ -343,11 +338,11 @@ struct MessageBubble: View {
                     )
                 } else {
                     Text(message.content)
-                        .font(.system(size: 16))
-                        .foregroundStyle(themeManager.textPrimary(colorScheme))
+                        .font(.system(size: 15))
+                        .foregroundStyle(themeManager.textSecondary(colorScheme))
                         .lineSpacing(2)
                 }
-                    
+                
                 // Reactions
                 if !message.reactions.isEmpty {
                     HStack(spacing: 8) {
@@ -361,27 +356,20 @@ struct MessageBubble: View {
             
             Spacer()
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(showActions ? themeManager.backgroundSecondary(colorScheme) : Color.clear)
-        )
+        .padding(.horizontal, 4)
+        .padding(.vertical, 4)
+        .background(Color.clear)
         .contentShape(Rectangle())
-        .onTapGesture {
-            // Dismiss keyboard
-        }
+        .onTapGesture {}
         .onLongPressGesture {
-            withAnimation(.spring(response: 0.3)) {
-                showActions = true
-            }
             HapticFeedback.light()
         }
-        .overlay {
-            if showActions {
-                MessageContextMenu(message: message, isShowing: $showActions)
-            }
-        }
+    }
+    
+    private func formattedTimestamp(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "M/d/yyyy h:mm a"
+        return formatter.string(from: date)
     }
 }
 
@@ -413,8 +401,8 @@ struct ReactionBubble: View {
     }
 }
 
-// MARK: - Typing Indicator
-struct TypingIndicator: View {
+// MARK: - Discord Typing Indicator
+struct DiscordTypingIndicator: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(\.colorScheme) private var colorScheme
     @State private var animationStep: Int = 0
@@ -472,8 +460,8 @@ struct TypingIndicator: View {
     }
 }
 
-// MARK: - Message Input View
-struct MessageInputView: View {
+// MARK: - Discord Input View
+struct DiscordInputView: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(\.colorScheme) private var colorScheme
     @Binding var text: String
@@ -487,8 +475,6 @@ struct MessageInputView: View {
     var onVoiceRecordingCancelled: () -> Void
     
     @State private var lastTypingSent: Date = .distantPast
-    @State private var isPressing: Bool = false
-    @State private var longPressTask: Task<Void, Never>?
     
     var body: some View {
         VStack(spacing: 0) {
@@ -496,19 +482,18 @@ struct MessageInputView: View {
                 .background(themeManager.separator(colorScheme))
             
             HStack(spacing: 12) {
-                // Attachment Button
+                // Plus/Attachment Button
                 Button(action: {}) {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 28))
-                        .foregroundStyle(themeManager.accentColor.color)
+                    Image(systemName: "plus")
+                        .font(.system(size: 24, weight: .medium))
+                        .foregroundStyle(themeManager.textTertiary(colorScheme))
                 }
                 
-                // Text Field
+                // Text Field Container
                 HStack(spacing: 8) {
-                    TextField("Message #general", text: $text, axis: .vertical)
-                        .font(.system(size: 17))
+                    TextField("Message #general", text: $text)
+                        .font(.system(size: 16))
                         .foregroundStyle(themeManager.textPrimary(colorScheme))
-                        .lineLimit(1...6)
                         .onChange(of: text) { _, newValue in
                             if !newValue.isEmpty {
                                 let now = Date()
@@ -518,29 +503,27 @@ struct MessageInputView: View {
                                 }
                             }
                         }
-                    
-                    if !text.isEmpty {
-                        Button(action: { text = "" }) {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 20))
-                                .foregroundStyle(themeManager.textTertiary(colorScheme))
-                        }
-                    }
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .padding(.vertical, 10)
                 .background(
                     RoundedRectangle(cornerRadius: 20)
                         .fill(themeManager.backgroundTertiary(colorScheme))
                 )
                 
-                // Send/Action Buttons
+                // Emoji Button
+                Button(action: {}) {
+                    Image(systemName: "face.smiling")
+                        .font(.system(size: 24))
+                        .foregroundStyle(themeManager.textTertiary(colorScheme))
+                }
+                
+                // Microphone Button (when text is empty)
                 if text.isEmpty {
-                    // Microphone button for voice messages
                     Button(action: {}) {
-                        Image(systemName: isRecording ? "waveform" : "mic.fill")
+                        Image(systemName: "mic")
                             .font(.system(size: 24))
-                            .foregroundStyle(isRecording ? themeManager.accentColor.color : themeManager.textSecondary(colorScheme))
+                            .foregroundStyle(themeManager.textTertiary(colorScheme))
                     }
                     .simultaneousGesture(
                         LongPressGesture(minimumDuration: 0.3)
@@ -559,22 +542,10 @@ struct MessageInputView: View {
                                 }
                             }
                     )
-                } else {
-                    Button(action: onSend) {
-                        if isSending {
-                            ProgressView()
-                                .tint(themeManager.accentColor.color)
-                        } else {
-                            Image(systemName: "arrow.up.circle.fill")
-                                .font(.system(size: 32))
-                                .foregroundStyle(themeManager.accentColor.color)
-                        }
-                    }
-                    .disabled(isSending)
                 }
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.vertical, 10)
             .background(themeManager.backgroundSecondary(colorScheme))
         }
     }
@@ -595,7 +566,6 @@ struct VoiceRecordingOverlay: View {
                 .background(themeManager.separator(colorScheme))
             
             HStack(spacing: 20) {
-                // Cancel Button
                 Button(action: onCancel) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 32))
@@ -604,23 +574,18 @@ struct VoiceRecordingOverlay: View {
                 
                 Spacer()
                 
-                // Recording Indicator
                 HStack(spacing: 12) {
-                    // Recording dot animation
                     RecordingDot()
                     
-                    // Waveform placeholder
                     HStack(spacing: 3) {
                         ForEach(0..<20) { i in
                             RoundedRectangle(cornerRadius: 2)
                                 .fill(themeManager.accentColor.color)
                                 .frame(width: 3, height: CGFloat.random(in: 8...32))
-                                .animation(.easeInOut(duration: 0.2).repeatForever(autoreverses: true), value: duration)
                         }
                     }
                     .frame(height: 40)
                     
-                    // Duration
                     Text(formattedDuration)
                         .font(.system(size: 17, weight: .medium, design: .monospaced))
                         .foregroundStyle(themeManager.textPrimary(colorScheme))
@@ -628,7 +593,6 @@ struct VoiceRecordingOverlay: View {
                 
                 Spacer()
                 
-                // Send Button
                 Button(action: onSend) {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.system(size: 32))
@@ -678,7 +642,6 @@ struct VoiceMessageBubble: View {
     
     var body: some View {
         HStack(spacing: 12) {
-            // Play/Pause Button
             Button(action: togglePlayback) {
                 Image(systemName: audioPlayer.isPlaying && audioPlayer.currentURL == localURL ? "pause.fill" : "play.fill")
                     .font(.system(size: 20))
@@ -690,9 +653,7 @@ struct VoiceMessageBubble: View {
                     )
             }
             
-            // Waveform & Progress
             VStack(alignment: .leading, spacing: 6) {
-                // Waveform visualization
                 WaveformView(
                     waveform: attachment.waveform ?? [],
                     progress: audioPlayer.currentURL == localURL ? audioPlayer.progress : 0,
@@ -700,7 +661,6 @@ struct VoiceMessageBubble: View {
                 )
                 .frame(height: 32)
                 
-                // Duration text
                 HStack {
                     Text(audioPlayer.currentURL == localURL ? audioPlayer.currentTimeString : "0:00")
                         .font(.system(size: 12, design: .monospaced))
@@ -720,8 +680,6 @@ struct VoiceMessageBubble: View {
                 .fill(isFromCurrentUser ? themeManager.accentColor.color : themeManager.backgroundTertiary(colorScheme))
         )
         .onAppear {
-            // Download audio file if needed
-            // For now, use a local placeholder
             if let url = URL(string: attachment.url) {
                 localURL = url
             }
@@ -769,70 +727,6 @@ struct WaveformView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-    }
-}
-
-// MARK: - Message Context Menu
-struct MessageContextMenu: View {
-    @Environment(ThemeManager.self) private var themeManager
-    @Environment(\.colorScheme) private var colorScheme
-    let message: Message
-    @Binding var isShowing: Bool
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            MenuButton(icon: "arrowshape.turn.up.left", title: "Reply", color: themeManager.textPrimary(colorScheme)) {}
-            MenuButton(icon: "face.smiling", title: "Add Reaction", color: themeManager.textPrimary(colorScheme)) {}
-            MenuButton(icon: "doc.on.doc", title: "Copy Text", color: themeManager.textPrimary(colorScheme)) {}
-            Divider().background(themeManager.separator(colorScheme))
-            MenuButton(icon: "pin", title: "Pin Message", color: themeManager.textPrimary(colorScheme)) {}
-            MenuButton(icon: "bell", title: "Remind Me", color: themeManager.textPrimary(colorScheme)) {}
-            Divider().background(themeManager.separator(colorScheme))
-            MenuButton(icon: "exclamationmark.triangle", title: "Report", color: .red) {}
-        }
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(themeManager.backgroundSecondary(colorScheme))
-                .shadow(color: Color.black.opacity(0.2), radius: 16, x: 0, y: 8)
-        )
-        .frame(width: 180)
-        .transition(.scale(scale: 0.9).combined(with: .opacity))
-        .onTapGesture {
-            isShowing = false
-        }
-        .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                withAnimation {
-                    isShowing = false
-                }
-            }
-        }
-    }
-}
-
-// MARK: - Menu Button
-struct MenuButton: View {
-    let icon: String
-    let title: String
-    let color: Color
-    let action: () -> Void
-    
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: icon)
-                    .font(.system(size: 16))
-                    .frame(width: 20)
-                Text(title)
-                    .font(.system(size: 16))
-                Spacer()
-            }
-            .foregroundStyle(color)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(PlainButtonStyle())
     }
 }
 

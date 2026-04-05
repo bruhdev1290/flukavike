@@ -1,6 +1,6 @@
 //
 //  ThemeManager.swift
-//  Theme system with extensive customization options
+//  Discord-style theme system
 //
 
 import SwiftUI
@@ -8,8 +8,8 @@ import Observation
 
 @Observable
 class ThemeManager {
-    var currentTheme: AppTheme = .system
-    var accentColor: AccentColor = .blueberry
+    var currentTheme: AppTheme = .dark
+    var accentColor: AccentColor = .indigo
     
     enum AppTheme: String, CaseIterable, Identifiable {
         case system = "System"
@@ -31,6 +31,7 @@ class ThemeManager {
         case grape = "Grape"
         case pink = "Pink"
         case platinum = "Platinum"
+        case indigo = "Indigo"
         
         var id: String { rawValue }
         
@@ -46,6 +47,7 @@ class ThemeManager {
             case .grape: return Color(red: 0.69, green: 0.32, blue: 0.87)
             case .pink: return Color(red: 1, green: 0.18, blue: 0.33)
             case .platinum: return Color(red: 0.56, green: 0.56, blue: 0.58)
+            case .indigo: return Color(red: 0.35, green: 0.35, blue: 0.9)
             }
         }
         
@@ -62,55 +64,62 @@ class ThemeManager {
         }
     }
     
-    // MARK: - Dynamic Colors
+    // MARK: - Dynamic Colors (Discord-style)
     
+    // Main background - very dark gray/almost black
     func backgroundPrimary(_ colorScheme: ColorScheme) -> Color {
         switch currentTheme {
         case .oled:
             return .black
         case .dark:
-            return Color(red: 0.11, green: 0.11, blue: 0.12)
+            return Color(red: 0.06, green: 0.06, blue: 0.07) // #0F0F10
         case .system, .light:
-            return colorScheme == .dark ? Color(red: 0.11, green: 0.11, blue: 0.12) : .white
+            return colorScheme == .dark ? Color(red: 0.06, green: 0.06, blue: 0.07) : .white
         }
     }
     
+    // Secondary background - slightly lighter
     func backgroundSecondary(_ colorScheme: ColorScheme) -> Color {
         switch currentTheme {
         case .oled:
             return Color(white: 0.04)
         case .dark:
-            return Color(red: 0.17, green: 0.17, blue: 0.18)
+            return Color(red: 0.11, green: 0.11, blue: 0.12) // #1C1C1F
         case .system, .light:
-            return colorScheme == .dark ? Color(red: 0.17, green: 0.17, blue: 0.18) : Color(red: 0.95, green: 0.95, blue: 0.97)
+            return colorScheme == .dark ? Color(red: 0.11, green: 0.11, blue: 0.12) : Color(red: 0.95, green: 0.95, blue: 0.97)
         }
     }
     
+    // Tertiary background - input fields, etc
     func backgroundTertiary(_ colorScheme: ColorScheme) -> Color {
         switch currentTheme {
         case .oled:
             return Color(white: 0.08)
         case .dark:
-            return Color(red: 0.23, green: 0.23, blue: 0.24)
+            return Color(red: 0.18, green: 0.18, blue: 0.19) // #2D2D30
         case .system, .light:
-            return colorScheme == .dark ? Color(red: 0.23, green: 0.23, blue: 0.24) : Color(red: 0.9, green: 0.9, blue: 0.92)
+            return colorScheme == .dark ? Color(red: 0.18, green: 0.18, blue: 0.19) : Color(red: 0.9, green: 0.9, blue: 0.92)
         }
     }
     
+    // Primary text - white in dark mode
     func textPrimary(_ colorScheme: ColorScheme) -> Color {
         colorScheme == .dark ? .white : .black
     }
     
+    // Secondary text - gray
     func textSecondary(_ colorScheme: ColorScheme) -> Color {
-        colorScheme == .dark ? Color(white: 0.6) : Color(white: 0.42)
+        colorScheme == .dark ? Color(white: 0.71) : Color(white: 0.42)
     }
     
+    // Tertiary text - darker gray
     func textTertiary(_ colorScheme: ColorScheme) -> Color {
-        colorScheme == .dark ? Color(white: 0.39) : Color(white: 0.61)
+        colorScheme == .dark ? Color(white: 0.5) : Color(white: 0.61)
     }
     
+    // Separator/divider
     func separator(_ colorScheme: ColorScheme) -> Color {
-        colorScheme == .dark ? Color(white: 0.22) : Color(white: 0.9)
+        colorScheme == .dark ? Color(white: 0.15) : Color(white: 0.9)
     }
 }
 
@@ -122,7 +131,13 @@ class AppState {
     var selectedChannel: Channel?
     var isShowingSettings: Bool = false
     var unreadNotifications: Int = 0
+    var unreadMessages: Int = 0
     var connectionStatus: ConnectionStatus = .disconnected
+    // ⚠️ WARNING — DO NOT REMOVE OR RENAME THIS PROPERTY.
+    // Fluxer delivers channel data via the WebSocket Gateway READY event, not the REST API.
+    // This property is populated by FluxerApp.onReady and consumed by HomeView.loadChannels.
+    // See README "Critical: Channel Loading Architecture" for full details.
+    var gatewayGuilds: [Server] = []
     
     var isAuthenticated: Bool {
         WebAuthService.shared.isAuthenticated

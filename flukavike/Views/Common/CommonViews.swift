@@ -305,6 +305,31 @@ struct ToggleRow: View {
     }
 }
 
+// MARK: - Hexagon Shape (Flukavike brand element)
+struct HexagonShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let width = rect.width
+        let height = rect.height
+        let side = min(width, height)
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        
+        for i in 0..<6 {
+            let angle = Double(i) * 60.0 - 30.0
+            let x = center.x + side/2 * CGFloat(cos(angle * .pi / 180))
+            let y = center.y + side/2 * CGFloat(sin(angle * .pi / 180))
+            
+            if i == 0 {
+                path.move(to: CGPoint(x: x, y: y))
+            } else {
+                path.addLine(to: CGPoint(x: x, y: y))
+            }
+        }
+        path.closeSubpath()
+        return path
+    }
+}
+
 // MARK: - Section Header
 struct SectionHeader: View {
     @Environment(ThemeManager.self) private var themeManager

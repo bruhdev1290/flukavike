@@ -12,6 +12,7 @@ struct NotificationsView: View {
     
     @State private var notifications: [AppNotification] = AppNotification.previewNotifications
     @State private var selectedFilter: NotificationFilter = .all
+    @State private var selectedServerId: String? = nil
     @State private var showFilterSheet: Bool = false
     
     enum NotificationFilter: String, CaseIterable, Identifiable {
@@ -24,16 +25,39 @@ struct NotificationsView: View {
     }
     
     var filteredNotifications: [AppNotification] {
-        switch selectedFilter {
-        case .all:
-            return notifications
-        case .mentions:
-            return notifications.filter { $0.type == .mention }
-        case .reactions:
-            return notifications.filter { $0.type == .reaction }
-        case .messages:
-            return notifications.filter { $0.type == .dm || $0.type == .reply }
+        notifications.filter { notification in
+            let matchesType: Bool = {
+                switch selectedFilter {
+                case .all:
+                    return true
+                case .mentions:
+                    return notification.type == .mention
+                case .reactions:
+                    return notification.type == .reaction
+                case .messages:
+                    return notification.type == .dm || notification.type == .reply
+                }
+            }()
+            
+            let matchesServer: Bool = {
+                guard let selectedId = selectedServerId else { return true }
+                return notification.serverId == selectedId
+            }()
+            
+            return matchesType && matchesServer
         }
+    }
+    
+    var uniqueServers: [(id: String, name: String)] {
+        var servers: [(id: String, name: String)] = []
+        for notification in notifications {
+            if let serverId = notification.serverId,
+               let serverName = notification.serverName,
+               !servers.contains(where: { $0.id == serverId }) {
+                servers.append((id: serverId, name: serverName))
+            }
+        }
+        return servers.sorted { $0.name < $1.name }
     }
     
     var unreadCount: Int {
@@ -84,37 +108,67 @@ struct NotificationsView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Menu {
-                        Button(action: { selectedFilter = .all }) {
-                            Label("All", systemImage: selectedFilter == .all ? "checkmark" : "")
-                        }
-                        Button(action: { selectedFilter = .mentions }) {
-                            Label("Mentions", systemImage: selectedFilter == .mentions ? "checkmark" : "")
-                        }
-                        Button(action: { selectedFilter = .reactions }) {
-                            Label("Reactions", systemImage: selectedFilter == .reactions ? "checkmark" : "")
-                        }
-                        Button(action: { selectedFilter = .messages }) {
-                            Label("Messages", systemImage: selectedFilter == .messages ? "checkmark" : "")
+                    HStack(spacing: 12) {
+                        // Type Filter
+                        Menu {
+                            Button(action: { selectedFilter = .all }) {
+                                Label("All", systemImage: selectedFilter == .all ? "checkmark" : "")
+                            }
+                            Button(action: { selectedFilter = .mentions }) {
+                                Label("Mentions", systemImage: selectedFilter == .mentions ? "checkmark" : "")
+                            }
+                            Button(action: { selectedFilter = .reactions }) {
+                                Label("Reactions", systemImage: selectedFilter == .reactions ? "checkmark" : "")
+                            }
+                            Button(action: { selectedFilter = .messages }) {
+                                Label("Messages", systemImage: selectedFilter == .messages ? "checkmark" : "")
+                            }
+                            
+                            Divider()
+                            
+                            Button("Mark All as Read") {
+                                markAllAsRead()
+                            }
+                            
+                            Button("Clear All", role: .destructive) {
+                                clearAll()
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(selectedFilter.rawValue)
+                                    .font(.system(size: 17, weight: .regular))
+                                Image(systemName: "chevron.down")
+                                    .font(.system(size: 12, weight: .semibold))
+                            }
+                            .foregroundStyle(themeManager.accentColor.color)
                         }
                         
-                        Divider()
-                        
-                        Button("Mark All as Read") {
-                            markAllAsRead()
+                        // Server Filter
+                        if !uniqueServers.isEmpty {
+                            Menu {
+                                Button(action: { selectedServerId = nil }) {
+                                    Label("All Servers", systemImage: selectedServerId == nil ? "checkmark" : "")
+                                }
+                                
+                                Divider()
+                                
+                                ForEach(uniqueServers, id: \.id) { server in
+                                    Button(action: { selectedServerId = server.id }) {
+                                        Label(server.name, systemImage: selectedServerId == server.id ? "checkmark" : "")
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "server.rack")
+                                        .font(.system(size: 14))
+                                    Text(selectedServerId == nil ? "All Servers" : uniqueServers.first { $0.id == selectedServerId }?.name ?? "Unknown")
+                                        .font(.system(size: 17, weight: .regular))
+                                    Image(systemName: "chevron.down")
+                                        .font(.system(size: 12, weight: .semibold))
+                                }
+                                .foregroundStyle(themeManager.accentColor.color)
+                            }
                         }
-                        
-                        Button("Clear All", role: .destructive) {
-                            clearAll()
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(selectedFilter.rawValue)
-                                .font(.system(size: 17, weight: .regular))
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: 12, weight: .semibold))
-                        }
-                        .foregroundStyle(themeManager.accentColor.color)
                     }
                 }
                 
@@ -152,7 +206,9 @@ struct NotificationsView: View {
                     message: notification.message,
                     timestamp: notification.timestamp,
                     read: true,
-                    relatedId: notification.relatedId
+                    relatedId: notification.relatedId,
+                    serverId: notification.serverId,
+                    serverName: notification.serverName
                 )
             }
         }
@@ -169,7 +225,9 @@ struct NotificationsView: View {
                     message: notification.message,
                     timestamp: notification.timestamp,
                     read: true,
-                    relatedId: notification.relatedId
+                    relatedId: notification.relatedId,
+                    serverId: notification.serverId,
+                    serverName: notification.serverName
                 )
             }
         }
@@ -220,6 +278,17 @@ struct NotificationRow: View {
                     .font(.system(size: 15))
                     .foregroundStyle(themeManager.textSecondary(colorScheme))
                     .lineLimit(2)
+                
+                if let serverName = notification.serverName {
+                    HStack(spacing: 4) {
+                        Image(systemName: "server.rack")
+                            .font(.system(size: 10))
+                        Text(serverName)
+                            .font(.system(size: 12))
+                    }
+                    .foregroundStyle(themeManager.accentColor.color.opacity(0.8))
+                    .padding(.top, 2)
+                }
             }
             
             // Unread Indicator

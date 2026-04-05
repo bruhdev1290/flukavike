@@ -211,20 +211,30 @@ struct Server: Identifiable, Decodable, Equatable {
         description: "Official Flukavike community",
         memberCount: 15420,
         instance: "fluxer.app",
-        channels: Channel.previewChannels
+        channels: [
+            Channel(id: "c1", serverId: "1", name: "announcements", topic: "Official announcements", type: .announcement, position: 0, parentId: nil, unreadCount: 2, mentionCount: 0, lastMessageAt: Date()),
+            Channel(id: "c2", serverId: "1", name: "general", topic: "General chat", type: .text, position: 1, parentId: nil, unreadCount: 0, mentionCount: 0, lastMessageAt: Date()),
+            Channel(id: "c3", serverId: "1", name: "help", topic: "Get help", type: .text, position: 2, parentId: nil, unreadCount: 5, mentionCount: 1, lastMessageAt: Date()),
+            Channel(id: "c4", serverId: "1", name: "random", topic: "Random stuff", type: .text, position: 3, parentId: nil, unreadCount: 0, mentionCount: 0, lastMessageAt: Date())
+        ]
     )
     
     static let previewServers = [
         preview,
         Server(
             id: "2",
-            name: "Swift Devs",
+            name: "Fluxer Developers",
             iconUrl: nil,
             bannerUrl: nil,
-            description: "Swift programming community",
+            description: "Developer community",
             memberCount: 8934,
-            instance: "swift.dev",
-            channels: []
+            instance: "fluxer.dev",
+            channels: [
+                Channel(id: "c5", serverId: "2", name: "general", topic: "Dev general", type: .text, position: 0, parentId: nil, unreadCount: 3, mentionCount: 0, lastMessageAt: Date()),
+                Channel(id: "c6", serverId: "2", name: "swift", topic: "Swift programming", type: .text, position: 1, parentId: nil, unreadCount: 8, mentionCount: 2, lastMessageAt: Date()),
+                Channel(id: "c7", serverId: "2", name: "api", topic: "API discussions", type: .text, position: 2, parentId: nil, unreadCount: 0, mentionCount: 0, lastMessageAt: Date()),
+                Channel(id: "c8", serverId: "2", name: "voice", topic: nil, type: .voice, position: 3, parentId: nil, unreadCount: 0, mentionCount: 0, lastMessageAt: nil)
+            ]
         ),
         Server(
             id: "3",
@@ -234,7 +244,12 @@ struct Server: Identifiable, Decodable, Equatable {
             description: "UI/UX Design discussions",
             memberCount: 3421,
             instance: "design.community",
-            channels: []
+            channels: [
+                Channel(id: "c9", serverId: "3", name: "inspiration", topic: "Design inspiration", type: .text, position: 0, parentId: nil, unreadCount: 0, mentionCount: 0, lastMessageAt: Date()),
+                Channel(id: "c10", serverId: "3", name: "critique", topic: "Get feedback", type: .text, position: 1, parentId: nil, unreadCount: 4, mentionCount: 0, lastMessageAt: Date()),
+                Channel(id: "c11", serverId: "3", name: "resources", topic: "Design resources", type: .text, position: 2, parentId: nil, unreadCount: 0, mentionCount: 0, lastMessageAt: Date()),
+                Channel(id: "c12", serverId: "3", name: "showcase", topic: "Show your work", type: .text, position: 3, parentId: nil, unreadCount: 12, mentionCount: 0, lastMessageAt: Date())
+            ]
         )
     ]
 }
@@ -304,10 +319,11 @@ struct Channel: Identifiable, Decodable, Equatable {
         name = try container.decodeIfPresent(String.self, forKey: .name) ?? "unknown"
         topic = try container.decodeIfPresent(String.self, forKey: .topic)
 
-        if let typeString = try container.decodeIfPresent(String.self, forKey: .type),
+        // Handle type - try string first, then int, then default to text
+        if let typeString = try? container.decode(String.self, forKey: .type),
            let parsedType = ChannelType(rawValue: typeString) {
             type = parsedType
-        } else if let typeInt = try container.decodeIfPresent(Int.self, forKey: .type) {
+        } else if let typeInt = try? container.decode(Int.self, forKey: .type) {
             switch typeInt {
             case 2:
                 type = .voice
@@ -629,6 +645,8 @@ struct AppNotification: Identifiable, Codable, Equatable {
     let timestamp: Date
     let read: Bool
     let relatedId: String?
+    let serverId: String?
+    let serverName: String?
     
     enum NotificationType: String, Codable {
         case mention
@@ -675,7 +693,9 @@ struct AppNotification: Identifiable, Codable, Equatable {
             message: "@you check out this design!",
             timestamp: Date().addingTimeInterval(-300),
             read: false,
-            relatedId: "m1"
+            relatedId: "m1",
+            serverId: "1",
+            serverName: "Flukavike HQ"
         ),
         AppNotification(
             id: "n2",
@@ -684,7 +704,9 @@ struct AppNotification: Identifiable, Codable, Equatable {
             message: "👍 on \"Hey everyone!\"",
             timestamp: Date().addingTimeInterval(-600),
             read: false,
-            relatedId: "m1"
+            relatedId: "m1",
+            serverId: "2",
+            serverName: "Fluxer Developers"
         ),
         AppNotification(
             id: "n3",
@@ -693,7 +715,31 @@ struct AppNotification: Identifiable, Codable, Equatable {
             message: "Alice is calling you",
             timestamp: Date().addingTimeInterval(-1800),
             read: true,
-            relatedId: nil
+            relatedId: nil,
+            serverId: nil,
+            serverName: nil
+        ),
+        AppNotification(
+            id: "n4",
+            type: .mention,
+            title: "Charlie mentioned you",
+            message: "@you what do you think about this?",
+            timestamp: Date().addingTimeInterval(-900),
+            read: false,
+            relatedId: "m2",
+            serverId: "2",
+            serverName: "Fluxer Developers"
+        ),
+        AppNotification(
+            id: "n5",
+            type: .reply,
+            title: "Elias replied to you",
+            message: "That's a great idea!",
+            timestamp: Date().addingTimeInterval(-1200),
+            read: true,
+            relatedId: "m3",
+            serverId: "1",
+            serverName: "Flukavike HQ"
         )
     ]
 }

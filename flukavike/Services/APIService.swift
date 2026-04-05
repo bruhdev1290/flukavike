@@ -85,6 +85,8 @@ class APIService {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30
         config.timeoutIntervalForResource = 300
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.urlCache = nil
         return URLSession(configuration: config)
     }
     
@@ -559,7 +561,8 @@ class APIService {
             request.httpBody = body
         }
         
-        print("[API] \(method) \(url.absoluteString)")
+        let tokenSnippet = activeAuthToken.map { String($0.prefix(12)) + "..." } ?? "nil"
+        NSLog("[flukavike] %@ %@ | auth: %@", method, url.absoluteString, tokenSnippet)
         let (data, response) = try await urlSession.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -631,7 +634,11 @@ class APIService {
     
     func getUserGuilds() async throws -> [Server] {
         let data = try await makeRequest(endpoint: "/users/@me/guilds")
-        return try JSONDecoder.flukavike.decode([Server].self, from: data)
+        let jsonString = String(data: data, encoding: .utf8) ?? ""
+        NSLog("[flukavike] Guilds raw response (%d bytes): %@", data.count, String(jsonString.prefix(3000)))
+        let guilds = try JSONDecoder.flukavike.decode([Server].self, from: data)
+        NSLog("[flukavike] Guilds decoded: %d servers", guilds.count)
+        return guilds
     }
     
     // MARK: - Guild Endpoints
@@ -643,6 +650,24 @@ class APIService {
     
     func getGuildChannels(guildId: String) async throws -> [Channel] {
         let data = try await makeRequest(endpoint: "/guilds/\(guildId)/channels")
+        let jsonString = String(data: data, encoding: .utf8) ?? ""
+        NSLog("[flukavike] Channels raw response for %@ (%d bytes): %@", guildId, data.count, String(jsonString.prefix(3000)))
+
+        // Try bare array first
+        if let channels = try? JSONDecoder.flukavike.decode([Channel].self, from: data) {
+            NSLog("[flukavike] Channels decoded as array: %d channels", channels.count)
+            return channels
+        }
+
+        // Try wrapped {"channels": [...]}
+        struct Wrapper: Decodable { let channels: [Channel] }
+        if let wrapper = try? JSONDecoder.flukavike.decode(Wrapper.self, from: data) {
+            NSLog("[flukavike] Channels decoded from wrapper: %d channels", wrapper.channels.count)
+            return wrapper.channels
+        }
+
+        // Surface the real decode error
+        NSLog("[flukavike] Channels decode failed, surfacing error")
         return try JSONDecoder.flukavike.decode([Channel].self, from: data)
     }
     
