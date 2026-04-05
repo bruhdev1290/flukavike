@@ -487,11 +487,14 @@ struct Message: Identifiable, Codable, Equatable {
         isPinned    = try c.decodeIfPresent(Bool.self, forKey: .pinned)
             ?? c.decodeIfPresent(Bool.self, forKey: .isPinned)
             ?? false
-        // "message_reference.message_id" → replyToId
-        if let ref = try c.decodeIfPresent([String: String].self, forKey: .messageReference) {
-            replyToId = ref["message_id"]
+        // ⚠️ WARNING — DO NOT change MessageReference back to [String: String].
+        // Fluxer's message_reference object includes a "type" field with an integer value.
+        // Decoding as [String: String] throws a typeMismatch and breaks the entire message
+        // array decode, causing "Failed to load message history" on any channel that has replies.
+        if let refData = try? c.decodeIfPresent(MessageReference.self, forKey: .messageReference) {
+            replyToId = refData.messageId
         } else {
-            replyToId = try c.decodeIfPresent(String.self, forKey: .replyToId)
+            replyToId = try? c.decodeIfPresent(String.self, forKey: .replyToId)
         }
     }
 
@@ -576,6 +579,20 @@ struct Message: Identifiable, Codable, Equatable {
     ]
 }
 
+// ⚠️ WARNING — DO NOT change these structs to [String: String] or remove them.
+// Fluxer returns mixed-type objects for both message references and emoji that cannot
+// be decoded as [String: String]. Reverting either struct will break message history
+// loading for any channel containing replies or reactions. See README for details.
+private struct MessageReference: Decodable {
+    // message_reference also contains "type" (Int) and "channel_id" (String) — only message_id is needed.
+    let messageId: String?
+}
+
+private struct EmojiObject: Decodable {
+    // emoji object contains "id" (Int or null) and "animated" (Bool) alongside "name" (String).
+    let name: String?
+}
+
 // MARK: - Reaction
 struct Reaction: Codable, Equatable {
     let emoji: String
@@ -591,11 +608,15 @@ struct Reaction: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
 
-        if let emojiObj = try? c.decodeIfPresent([String: String].self, forKey: .emoji),
-           let name = emojiObj["name"] {
+        // ⚠️ WARNING — DO NOT use [String: String] here or remove the try?.
+        // Fluxer emoji objects contain "id" (Int) and "animated" (Bool) — not all strings.
+        // If decoding throws instead of returning nil, a single reaction breaks the entire
+        // message array decode, causing "Failed to load message history" for that channel.
+        if let emojiObj = try? c.decodeIfPresent(EmojiObject.self, forKey: .emoji),
+           let name = emojiObj.name {
             emoji = name
         } else {
-            emoji = (try c.decodeIfPresent(String.self, forKey: .emoji)) ?? "?"
+            emoji = (try? c.decodeIfPresent(String.self, forKey: .emoji)) ?? "?"
         }
 
         count = (try c.decodeIfPresent(Int.self, forKey: .count)) ?? 0

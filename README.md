@@ -180,6 +180,22 @@ enum AccentColor: String, CaseIterable, Identifiable {
 
 ---
 
+## ⚠️ Critical: Message Decoding — Mixed-Type Fluxer Objects
+
+**Do not simplify the `MessageReference` or `EmojiObject` structs in `Models.swift`.**
+
+Fluxer's API returns two objects that cannot be decoded as `[String: String]`:
+
+- **`message_reference`** — contains a `type` field with an **integer** value alongside string fields. Decoding as `[String: String]` throws a `typeMismatch` error that propagates up and fails the entire message array, breaking history loading on any channel with replied-to messages.
+
+- **`emoji`** (inside reactions) — contains `id` (integer or null) and `animated` (bool) alongside the `name` string. Same consequence: one bad reaction kills the whole channel decode.
+
+Both are handled with private typed structs (`MessageReference`, `EmojiObject`) that only decode the fields actually needed, with `try?` used at the call sites so any unexpected shape produces a nil rather than a throw.
+
+**File:** `Models/Models.swift` — search for `⚠️ WARNING` to find all three affected sites.
+
+---
+
 ## ⚠️ Critical: Channel Loading Architecture
 
 **Do not change how channels are fetched without reading this first.**
