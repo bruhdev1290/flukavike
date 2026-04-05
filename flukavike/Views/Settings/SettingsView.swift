@@ -62,7 +62,8 @@ struct SettingsView: View {
                             icon: "paintbrush.fill",
                             iconColor: .purple,
                             title: "Theme & Colors",
-                            subtitle: "\(themeManager.currentTheme.rawValue) · \(themeManager.accentColor.rawValue)"
+                            subtitle: "\(themeManager.currentTheme.rawValue) · \(themeManager.accentColor.rawValue)",
+                            showChevron: false
                         )
                     }
                     .listRowBackground(themeManager.backgroundPrimary(colorScheme))
@@ -93,7 +94,8 @@ struct SettingsView: View {
                             icon: "envelope.fill",
                             iconColor: .blue,
                             title: "Contact Support",
-                            subtitle: "Report issues or send feedback"
+                            subtitle: "Report issues or send feedback",
+                            showChevron: false
                         )
                     }
                     .listRowBackground(themeManager.backgroundPrimary(colorScheme))
