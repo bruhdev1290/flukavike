@@ -952,6 +952,50 @@ class APIService {
             method: "POST"
         )
     }
+    
+    // MARK: - Message Editing
+    
+    func editMessage(channelId: String, messageId: String, content: String) async throws -> Message {
+        let body: [String: Any] = ["content": content]
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        let data = try await makeRequest(
+            endpoint: "/channels/\(channelId)/messages/\(messageId)",
+            method: "PATCH",
+            body: bodyData
+        )
+        return try JSONDecoder.flukavike.decode(Message.self, from: data)
+    }
+    
+    func deleteMessage(channelId: String, messageId: String) async throws {
+        _ = try await makeRequest(
+            endpoint: "/channels/\(channelId)/messages/\(messageId)",
+            method: "DELETE"
+        )
+    }
+    
+    // MARK: - Reactions
+    
+    func addReaction(channelId: String, messageId: String, emoji: String) async throws {
+        // URL-encode the emoji for the path - Unicode emojis need special encoding
+        let encodedEmoji = emoji.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? emoji
+        let endpoint = "/channels/\(channelId)/messages/\(messageId)/reactions/\(encodedEmoji)/@me"
+        print("[Flukavike] Adding reaction: \(endpoint)")
+        _ = try await makeRequest(
+            endpoint: endpoint,
+            method: "PUT"
+        )
+    }
+    
+    func removeReaction(channelId: String, messageId: String, emoji: String) async throws {
+        // URL-encode the emoji for the path
+        let encodedEmoji = emoji.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? emoji
+        let endpoint = "/channels/\(channelId)/messages/\(messageId)/reactions/\(encodedEmoji)/@me"
+        print("[Flukavike] Removing reaction: \(endpoint)")
+        _ = try await makeRequest(
+            endpoint: endpoint,
+            method: "DELETE"
+        )
+    }
 }
 
 // MARK: - Instance Discovery Model
@@ -1127,6 +1171,35 @@ enum APIError: Error {
     case serverError(statusCode: Int, message: String? = nil)
     case decodingError(Error)
     case discoveryFailed
+    
+    var localizedDescription: String {
+        switch self {
+        case .invalidURL:
+            return "Invalid URL"
+        case .invalidResponse:
+            return "Invalid response"
+        case .unauthorized:
+            return "Unauthorized"
+        case .forbidden(let message):
+            return "Forbidden: \(message ?? "")"
+        case .ipAuthorizationRequired:
+            return "IP authorization required"
+        case .notFound:
+            return "Not found"
+        case .rateLimited:
+            return "Rate limited"
+        case .mfaRequired:
+            return "MFA required"
+        case .captchaRequired:
+            return "Captcha required"
+        case .serverError(let code, let message):
+            return "Server error \(code): \(message ?? "")"
+        case .decodingError(let error):
+            return "Decoding error: \(error.localizedDescription)"
+        case .discoveryFailed:
+            return "Discovery failed"
+        }
+    }
 }
 
 // MARK: - JSON Decoder Extension

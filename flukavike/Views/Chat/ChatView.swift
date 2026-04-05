@@ -39,6 +39,13 @@ struct ChatView: View {
     
     // Reply to message
     @State private var replyingToMessage: Message? = nil
+    
+    // Edit message
+    @State private var editingMessage: Message? = nil
+    @State private var originalMessageContent: String = ""
+    
+    // Message context menu
+    @State private var selectedMessageForMenu: Message? = nil
 
     // Starred state (backed by StarredChannelsManager)
     @State private var isPinned: Bool = false
@@ -88,13 +95,30 @@ struct ChatView: View {
                         ForEach(visibleMessages) { message in
                             DiscordMessageBubble(
                                 message: message,
+                                currentUserId: appState.currentUser?.id,
+                                channelId: channel.id,
                                 onImageTap: { url in
                                     lightboxURL = IdentifiableURL(url)
                                 },
                                 onReply: {
                                     replyingToMessage = message
+                                    editingMessage = nil
                                     isInputFocused = true
                                     HapticFeedback.medium()
+                                },
+                                onEdit: {
+                                    editingMessage = message
+                                    originalMessageContent = message.content
+                                    messageText = message.content
+                                    replyingToMessage = nil
+                                    isInputFocused = true
+                                    HapticFeedback.medium()
+                                },
+                                onDelete: {
+                                    deleteMessage(message)
+                                },
+                                onReactionToggle: { emoji in
+                                    toggleReaction(on: message, emoji: emoji)
                                 }
                             )
                             .id(message.id)
@@ -162,6 +186,19 @@ struct ChatView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             
+            // Edit Preview
+            if let editing = editingMessage {
+                EditPreviewView(
+                    message: editing,
+                    onCancel: {
+                        editingMessage = nil
+                        messageText = ""
+                    }
+                )
+                .environment(themeManager)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            
             // Input Area
             DiscordInputView(
                 text: $messageText,
@@ -169,7 +206,9 @@ struct ChatView: View {
                 isSending: $isSending,
                 isRecording: $isRecordingVoice,
                 replyingTo: $replyingToMessage,
+                editingMessage: $editingMessage,
                 onSend: sendMessage,
+                onEdit: saveEditedMessage,
                 onTyping: sendTypingIndicator,
                 onVoiceRecording: handleVoiceRecording,
                 onVoiceRecordingCancelled: cancelVoiceRecording,
@@ -283,6 +322,12 @@ struct ChatView: View {
     }
     
     private func sendMessage() {
+        // If we're editing, save the edit instead
+        if editingMessage != nil {
+            saveEditedMessage()
+            return
+        }
+        
         guard !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let content = messageText
         let replyToId = replyingToMessage?.id
@@ -305,6 +350,127 @@ struct ChatView: View {
                 await MainActor.run {
                     self.isSending = false
                     self.messageText = content
+                }
+            }
+        }
+    }
+    
+    private func saveEditedMessage() {
+        guard let editing = editingMessage else { return }
+        let newContent = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !newContent.isEmpty else { return }
+        
+        // Optimistically update the message locally
+        if let index = messages.firstIndex(where: { $0.id == editing.id }) {
+            let updatedMessage = Message(
+                id: editing.id,
+                channelId: editing.channelId,
+                author: editing.author,
+                content: newContent,
+                timestamp: editing.timestamp,
+                editedTimestamp: Date(),
+                replyToId: editing.replyToId,
+                reactions: editing.reactions,
+                attachments: editing.attachments,
+                isPinned: editing.isPinned
+            )
+            messages[index] = updatedMessage
+        }
+        
+        let editingId = editing.id
+        messageText = ""
+        editingMessage = nil
+        isSending = true
+        
+        Task {
+            do {
+                _ = try await apiService.editMessage(
+                    channelId: channel.id,
+                    messageId: editingId,
+                    content: newContent
+                )
+                await MainActor.run {
+                    self.isSending = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.isSending = false
+                    // Revert on error by reloading messages
+                    self.loadMessages()
+                }
+            }
+        }
+    }
+    
+    private func deleteMessage(_ message: Message) {
+        Task {
+            do {
+                try await apiService.deleteMessage(channelId: channel.id, messageId: message.id)
+                await MainActor.run {
+                    messages.removeAll { $0.id == message.id }
+                    ToastManager.shared.show("Message deleted")
+                }
+            } catch {
+                await MainActor.run {
+                    ToastManager.shared.show("Failed to delete message")
+                }
+            }
+        }
+    }
+    
+    private func toggleReaction(on message: Message, emoji: String) {
+        let hasReacted = message.reactions.contains { $0.emoji == emoji && $0.me }
+        
+        // Optimistically update the UI immediately
+        if let index = messages.firstIndex(where: { $0.id == message.id }) {
+            var updatedReactions = messages[index].reactions
+            if let reactionIndex = updatedReactions.firstIndex(where: { $0.emoji == emoji }) {
+                var reaction = updatedReactions[reactionIndex]
+                if hasReacted {
+                    reaction = Reaction(emoji: emoji, count: max(0, reaction.count - 1), me: false)
+                    if reaction.count == 0 {
+                        updatedReactions.remove(at: reactionIndex)
+                    } else {
+                        updatedReactions[reactionIndex] = reaction
+                    }
+                } else {
+                    reaction = Reaction(emoji: emoji, count: reaction.count + 1, me: true)
+                    updatedReactions[reactionIndex] = reaction
+                }
+            } else if !hasReacted {
+                updatedReactions.append(Reaction(emoji: emoji, count: 1, me: true))
+            }
+            
+            let updatedMessage = Message(
+                id: message.id,
+                channelId: message.channelId,
+                author: message.author,
+                content: message.content,
+                timestamp: message.timestamp,
+                editedTimestamp: message.editedTimestamp,
+                replyToId: message.replyToId,
+                reactions: updatedReactions,
+                attachments: message.attachments,
+                isPinned: message.isPinned
+            )
+            messages[index] = updatedMessage
+        }
+        
+        Task {
+            do {
+                if hasReacted {
+                    try await apiService.removeReaction(channelId: channel.id, messageId: message.id, emoji: emoji)
+                } else {
+                    try await apiService.addReaction(channelId: channel.id, messageId: message.id, emoji: emoji)
+                }
+                await MainActor.run {
+                    HapticFeedback.light()
+                }
+            } catch {
+                // Revert on error
+                loadMessages()
+                await MainActor.run {
+                    ToastManager.shared.show("Failed to update reaction")
                 }
             }
         }
@@ -428,9 +594,18 @@ struct DiscordMessageBubble: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(\.colorScheme) private var colorScheme
     let message: Message
+    var currentUserId: String?
+    var channelId: String
     var onImageTap: ((URL) -> Void)?
     var onReply: (() -> Void)?
-    @State private var showActions: Bool = false
+    var onEdit: (() -> Void)?
+    var onDelete: (() -> Void)?
+    var onReactionToggle: ((String) -> Void)?
+    @State private var showContextMenu: Bool = false
+    
+    private var isOwnMessage: Bool {
+        message.author.id == currentUserId
+    }
     
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -484,7 +659,12 @@ struct DiscordMessageBubble: View {
                 if !message.reactions.isEmpty {
                     HStack(spacing: 8) {
                         ForEach(message.reactions, id: \.emoji) { reaction in
-                            ReactionBubble(reaction: reaction)
+                            ReactionBubble(
+                                reaction: reaction,
+                                messageId: message.id,
+                                channelId: message.channelId,
+                                onToggle: onReactionToggle
+                            )
                         }
                     }
                     .padding(.top, 4)
@@ -499,7 +679,21 @@ struct DiscordMessageBubble: View {
         .contentShape(Rectangle())
         .onTapGesture {}
         .onLongPressGesture {
-            onReply?()
+            showContextMenu = true
+            HapticFeedback.medium()
+        }
+        .sheet(isPresented: $showContextMenu) {
+            MessageContextMenu(
+                message: message,
+                channelId: channelId,
+                onReply: onReply,
+                onEdit: isOwnMessage ? onEdit : nil,
+                onDelete: isOwnMessage ? onDelete : nil,
+                onReactionToggle: { emoji in
+                    onReactionToggle?(emoji)
+                }
+            )
+            .environment(themeManager)
         }
     }
     
@@ -515,26 +709,34 @@ struct ReactionBubble: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(\.colorScheme) private var colorScheme
     let reaction: Reaction
+    let messageId: String?
+    let channelId: String?
+    let onToggle: ((String) -> Void)?
     
     var body: some View {
-        HStack(spacing: 4) {
-            Text(reaction.emoji)
-                .font(.system(size: 14))
-            
-            Text("\(reaction.count)")
-                .font(.system(size: 12, weight: reaction.me ? .semibold : .medium))
-                .foregroundStyle(reaction.me ? themeManager.accentColor.color : themeManager.textSecondary(colorScheme))
+        Button(action: {
+            onToggle?(reaction.emoji)
+        }) {
+            HStack(spacing: 4) {
+                Text(reaction.emoji)
+                    .font(.system(size: 14))
+                
+                Text("\(reaction.count)")
+                    .font(.system(size: 12, weight: reaction.me ? .semibold : .medium))
+                    .foregroundStyle(reaction.me ? themeManager.accentColor.color : themeManager.textSecondary(colorScheme))
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                Capsule()
+                    .fill(reaction.me ? themeManager.accentColor.color.opacity(0.15) : themeManager.backgroundTertiary(colorScheme))
+            )
+            .overlay(
+                Capsule()
+                    .stroke(reaction.me ? themeManager.accentColor.color.opacity(0.3) : Color.clear, lineWidth: 1)
+            )
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(
-            Capsule()
-                .fill(reaction.me ? themeManager.accentColor.color.opacity(0.15) : themeManager.backgroundTertiary(colorScheme))
-        )
-        .overlay(
-            Capsule()
-                .stroke(reaction.me ? themeManager.accentColor.color.opacity(0.3) : Color.clear, lineWidth: 1)
-        )
+        .buttonStyle(PlainButtonStyle())
     }
 }
 
@@ -804,6 +1006,50 @@ struct ReplyPreviewView: View {
     }
 }
 
+// MARK: - Edit Preview View
+struct EditPreviewView: View {
+    @Environment(ThemeManager.self) private var themeManager
+    @Environment(\.colorScheme) private var colorScheme
+    let message: Message
+    let onCancel: () -> Void
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            // Edit icon and line
+            HStack(spacing: 4) {
+                Image(systemName: "pencil")
+                    .font(.system(size: 12))
+                    .foregroundStyle(themeManager.accentColor.color)
+                Rectangle()
+                    .fill(themeManager.accentColor.color.opacity(0.5))
+                    .frame(width: 2, height: 24)
+            }
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Editing message")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(themeManager.accentColor.color)
+                
+                Text(message.content.prefix(60))
+                    .font(.system(size: 13))
+                    .foregroundStyle(themeManager.textSecondary(colorScheme))
+                    .lineLimit(1)
+            }
+            
+            Spacer()
+            
+            Button(action: onCancel) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundStyle(themeManager.textTertiary(colorScheme))
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(themeManager.backgroundSecondary(colorScheme))
+    }
+}
+
 // MARK: - Reply Reference View (shown on replied messages)
 struct ReplyReferenceView: View {
     @Environment(ThemeManager.self) private var themeManager
@@ -838,8 +1084,10 @@ struct DiscordInputView: View {
     @Binding var isSending: Bool
     @Binding var isRecording: Bool
     @Binding var replyingTo: Message?
+    @Binding var editingMessage: Message?
     
     var onSend: () -> Void
+    var onEdit: () -> Void
     var onTyping: () -> Void
     var onVoiceRecording: (Bool) -> Void
     var onVoiceRecordingCancelled: () -> Void
@@ -864,11 +1112,11 @@ struct DiscordInputView: View {
                 
                 // Text Field Container
                 HStack(spacing: 8) {
-                    TextField("Message #general", text: $text)
+                    TextField(editingMessage != nil ? "Edit message" : "Message #general", text: $text)
                         .font(.system(size: 16))
                         .foregroundStyle(themeManager.textPrimary(colorScheme))
                         .onChange(of: text) { _, newValue in
-                            if !newValue.isEmpty {
+                            if !newValue.isEmpty && editingMessage == nil {
                                 let now = Date()
                                 if now.timeIntervalSince(lastTypingSent) > 3 {
                                     lastTypingSent = now
@@ -925,6 +1173,14 @@ struct DiscordInputView: View {
                                 }
                             }
                     )
+                } else if editingMessage != nil {
+                    // Editing mode - show save button
+                    Button(action: onEdit) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 30))
+                            .foregroundStyle(themeManager.accentColor.color)
+                    }
+                    .transition(.scale.combined(with: .opacity))
                 } else {
                     Button(action: onSend) {
                         Image(systemName: "arrow.up.circle.fill")

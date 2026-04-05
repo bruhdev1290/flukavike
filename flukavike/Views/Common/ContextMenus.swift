@@ -536,6 +536,244 @@ struct MenuButtonWithChevron: View {
     }
 }
 
+// MARK: - Message Context Menu
+struct MessageContextMenu: View {
+    @Environment(ThemeManager.self) private var themeManager
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dismiss) private var dismiss
+    @Environment(AppState.self) private var appState
+    
+    let message: Message
+    let channelId: String
+    let onReply: (() -> Void)?
+    let onEdit: (() -> Void)?
+    let onDelete: (() -> Void)?
+    let onReactionToggle: ((String) -> Void)?
+    
+    private var isOwnMessage: Bool {
+        message.author.id == appState.currentUser?.id
+    }
+    
+    // Quick reaction emojis
+    private let quickEmojis = ["👍", "❤️", "😂", "😮", "😢", "🎉", "🔥", "👏"]
+    
+    private let apiService = APIService.shared
+    
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                // Handle bar
+                RoundedRectangle(cornerRadius: 2.5)
+                    .fill(themeManager.textTertiary(colorScheme).opacity(0.5))
+                    .frame(width: 40, height: 5)
+                    .padding(.top, 12)
+                    .padding(.bottom, 20)
+                
+                // Message Preview Header
+                HStack(spacing: 12) {
+                    AvatarView(user: message.author, size: 44)
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(message.author.formattedName)
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(themeManager.textPrimary(colorScheme))
+                        
+                        Text(message.content.prefix(80))
+                            .font(.system(size: 14))
+                            .foregroundStyle(themeManager.textSecondary(colorScheme))
+                            .lineLimit(2)
+                    }
+                    
+                    Spacer()
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 24)
+                
+                ScrollView {
+                    VStack(spacing: 12) {
+                        // Section: Quick Reactions
+                        VStack(spacing: 0) {
+                            HStack(spacing: 0) {
+                                ForEach(quickEmojis, id: \.self) { emoji in
+                                    let hasReacted = message.reactions.contains { $0.emoji == emoji && $0.me }
+                                    EmojiReactionButton(
+                                        emoji: emoji,
+                                        hasReacted: hasReacted,
+                                        accentColor: themeManager.accentColor.color
+                                    ) {
+                                        onReactionToggle?(emoji)
+                                        HapticFeedback.light()
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 8)
+                        }
+                        .background(themeManager.backgroundSecondary(colorScheme))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        
+                        // Section: Actions
+                        VStack(spacing: 0) {
+                            // Reply
+                            MenuButton(icon: "arrowshape.turn.up.left", title: "Reply", color: themeManager.textPrimary(colorScheme)) {
+                                onReply?()
+                                dismiss()
+                            }
+                            
+                            Divider()
+                                .background(themeManager.separator(colorScheme))
+                                .padding(.leading, 56)
+                            
+                            // Copy Text
+                            MenuButton(icon: "doc.on.doc", title: "Copy Text", color: themeManager.textPrimary(colorScheme)) {
+                                UIPasteboard.general.string = message.content
+                                ToastManager.shared.show("Copied to clipboard")
+                                dismiss()
+                            }
+                        }
+                        .background(themeManager.backgroundSecondary(colorScheme))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        
+                        // Section: Own Message Actions
+                        if isOwnMessage {
+                            VStack(spacing: 0) {
+                                // Edit
+                                MenuButton(icon: "pencil", title: "Edit", color: themeManager.textPrimary(colorScheme)) {
+                                    onEdit?()
+                                    dismiss()
+                                }
+                                
+                                Divider()
+                                    .background(themeManager.separator(colorScheme))
+                                    .padding(.leading, 56)
+                                
+                                // Delete
+                                MenuButton(icon: "trash", title: "Delete", color: .red) {
+                                    onDelete?()
+                                    dismiss()
+                                }
+                            }
+                            .background(themeManager.backgroundSecondary(colorScheme))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                        
+                        // Section: Message Info
+                        VStack(spacing: 0) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "clock")
+                                    .font(.system(size: 20))
+                                    .foregroundStyle(themeManager.textSecondary(colorScheme))
+                                    .frame(width: 24)
+                                
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Sent")
+                                        .font(.system(size: 16))
+                                        .foregroundStyle(themeManager.textPrimary(colorScheme))
+                                    Text(formattedTimestamp(message.timestamp))
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(themeManager.textSecondary(colorScheme))
+                                }
+                                
+                                Spacer()
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            
+                            if message.isEdited, let editedAt = message.editedTimestamp {
+                                Divider()
+                                    .background(themeManager.separator(colorScheme))
+                                    .padding(.leading, 56)
+                                
+                                HStack(spacing: 12) {
+                                    Image(systemName: "pencil.line")
+                                        .font(.system(size: 20))
+                                        .foregroundStyle(themeManager.textSecondary(colorScheme))
+                                        .frame(width: 24)
+                                    
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Edited")
+                                            .font(.system(size: 16))
+                                            .foregroundStyle(themeManager.textPrimary(colorScheme))
+                                        Text(formattedTimestamp(editedAt))
+                                            .font(.system(size: 13))
+                                            .foregroundStyle(themeManager.textSecondary(colorScheme))
+                                    }
+                                    
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 12)
+                            }
+                        }
+                        .background(themeManager.backgroundSecondary(colorScheme))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    .padding(.horizontal, 16)
+                }
+                
+                Spacer()
+            }
+            .background(themeManager.backgroundPrimary(colorScheme))
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                    .foregroundStyle(themeManager.accentColor.color)
+                }
+            }
+        }
+    }
+    
+    private func formattedTimestamp(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+}
+
+// MARK: - Emoji Reaction Button
+struct EmojiReactionButton: View {
+    let emoji: String
+    let hasReacted: Bool
+    let accentColor: Color
+    let action: () -> Void
+    
+    @State private var isPressed = false
+    
+    var body: some View {
+        Button(action: {
+            NSLog("[Flukavike] Emoji button tapped: %@", emoji)
+            withAnimation(.easeInOut(duration: 0.1)) {
+                isPressed = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                withAnimation(.easeInOut(duration: 0.1)) {
+                    isPressed = false
+                }
+            }
+            action()
+        }) {
+            Text(emoji)
+                .font(.system(size: 28))
+                .frame(maxWidth: .infinity)
+                .frame(height: 50)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(hasReacted ? accentColor.opacity(0.3) : Color.gray.opacity(0.1))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(hasReacted ? accentColor : Color.clear, lineWidth: 2)
+                )
+                .scaleEffect(isPressed ? 0.85 : 1.0)
+        }
+        .buttonStyle(BorderlessButtonStyle())
+    }
+}
+
 // MARK: - Preview
 #Preview {
     VStack {
