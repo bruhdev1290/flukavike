@@ -155,10 +155,22 @@ struct ChatView: View {
                     self.isLoading = false
                 }
             } catch {
+                NSLog("[flukavike] loadMessages failed for channel %@: %@", channel.id, String(describing: error))
                 await MainActor.run {
                     self.isLoading = false
                     self.messages = []
-                    self.errorMessage = "Failed to load message history."
+                    switch error as? APIError {
+                    case .forbidden:
+                        self.errorMessage = "You don't have permission to view this channel's history."
+                    case .notFound:
+                        self.errorMessage = "Channel not found."
+                    case .unauthorized:
+                        self.errorMessage = "Session expired. Please log in again."
+                    case .serverError(let code, let msg):
+                        self.errorMessage = "Server error \(code)\(msg.map { ": \($0)" } ?? "")."
+                    default:
+                        self.errorMessage = "Failed to load message history."
+                    }
                 }
             }
         }
