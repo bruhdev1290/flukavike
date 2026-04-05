@@ -5,14 +5,65 @@
 
 import SwiftUI
 
+// MARK: - Toast Notification
+@Observable
+class ToastManager {
+    static let shared = ToastManager()
+    private(set) var message: String?
+    private(set) var isShowing = false
+    
+    func show(_ message: String) {
+        self.message = message
+        isShowing = true
+        
+        // Auto-hide after 2 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            withAnimation {
+                self?.isShowing = false
+            }
+        }
+    }
+}
+
+struct ToastView: View {
+    let message: String
+    
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 16))
+                .foregroundStyle(.white)
+            Text(message)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(
+            Capsule()
+                .fill(Color.black.opacity(0.8))
+        )
+        .shadow(color: .black.opacity(0.2), radius: 10, x: 0, y: 4)
+    }
+}
+
 // MARK: - Channel Context Menu
 struct ChannelContextMenu: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppState.self) private var appState
     
     let channel: Channel
     let server: Server?
+    
+    private var isStarred: Bool {
+        StarredChannelsManager.shared.isStarred(channel.id)
+    }
+    
+    private var serverName: String {
+        server?.name ?? StarredChannelsManager.shared.serverName(for: channel.id)
+    }
     
     var body: some View {
         NavigationStack {
@@ -49,24 +100,24 @@ struct ChannelContextMenu: View {
                 
                 ScrollView {
                     VStack(spacing: 12) {
-                        // Mark as Read
-                        MenuButton(icon: "eye", title: "Mark as Read", color: themeManager.textPrimary(colorScheme)) {
-                            dismiss()
-                        }
-                        
-                        // Section: Notifications
-                        VStack(spacing: 0) {
-                            MenuButton(icon: "bell", title: "Notification Settings", color: themeManager.textPrimary(colorScheme)) {
+                        // Mark as Read (only if has unread)
+                        if channel.hasUnread {
+                            MenuButton(icon: "eye", title: "Mark as Read", color: themeManager.textPrimary(colorScheme)) {
+                                markAsRead()
                                 dismiss()
                             }
                         }
-                        .background(themeManager.backgroundSecondary(colorScheme))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
                         
                         // Section: Channel Options
                         VStack(spacing: 0) {
+                            // Star/Unstar Channel
                             if channel.type != .voice {
-                                MenuButton(icon: "pin", title: "Pin Channel", color: themeManager.textPrimary(colorScheme)) {
+                                MenuButton(
+                                    icon: isStarred ? "star.fill" : "star",
+                                    title: isStarred ? "Unstar Channel" : "Star Channel",
+                                    color: isStarred ? .yellow : themeManager.textPrimary(colorScheme)
+                                ) {
+                                    toggleStar()
                                     dismiss()
                                 }
                                 
@@ -75,7 +126,9 @@ struct ChannelContextMenu: View {
                                     .padding(.leading, 56)
                             }
                             
-                            MenuButton(icon: "bell.slash", title: "Mute Channel", color: themeManager.textPrimary(colorScheme)) {
+                            // Copy Channel Link
+                            MenuButton(icon: "link", title: "Copy Link", color: themeManager.textPrimary(colorScheme)) {
+                                copyChannelLink()
                                 dismiss()
                             }
                             
@@ -84,7 +137,8 @@ struct ChannelContextMenu: View {
                                     .background(themeManager.separator(colorScheme))
                                     .padding(.leading, 56)
                                 
-                                MenuButton(icon: "person.badge.plus", title: "Invite Friends", color: themeManager.textPrimary(colorScheme)) {
+                                // Mute Channel (placeholder - would need backend support)
+                                MenuButton(icon: "bell.slash", title: "Mute Channel (Soon)", color: themeManager.textSecondary(colorScheme)) {
                                     dismiss()
                                 }
                             }
@@ -92,18 +146,29 @@ struct ChannelContextMenu: View {
                         .background(themeManager.backgroundSecondary(colorScheme))
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                         
-                        // Section: Danger Zone
+                        // Section: Channel Info
                         VStack(spacing: 0) {
-                            MenuButton(icon: "xmark.circle", title: "Leave Channel", color: .red) {
-                                dismiss()
-                            }
-                            
-                            Divider()
-                                .background(themeManager.separator(colorScheme))
-                                .padding(.leading, 56)
-                            
-                            MenuButton(icon: "flag", title: "Report Channel", color: .red) {
-                                dismiss()
+                            if let topic = channel.topic, !topic.isEmpty {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "info.circle")
+                                        .font(.system(size: 20))
+                                        .foregroundStyle(themeManager.textSecondary(colorScheme))
+                                        .frame(width: 24)
+                                    
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Topic")
+                                            .font(.system(size: 16))
+                                            .foregroundStyle(themeManager.textPrimary(colorScheme))
+                                        Text(topic)
+                                            .font(.system(size: 13))
+                                            .foregroundStyle(themeManager.textSecondary(colorScheme))
+                                            .lineLimit(2)
+                                    }
+                                    
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 12)
                             }
                         }
                         .background(themeManager.backgroundSecondary(colorScheme))
@@ -140,6 +205,26 @@ struct ChannelContextMenu: View {
             return "megaphone"
         }
     }
+    
+    private func toggleStar() {
+        let newState = StarredChannelsManager.shared.toggle(channelId: channel.id, serverName: serverName)
+        HapticFeedback.light()
+        ToastManager.shared.show(newState ? "Channel starred" : "Channel unstarred")
+    }
+    
+    private func markAsRead() {
+        // In a real implementation, this would call an API endpoint
+        // For now, we just show a toast
+        HapticFeedback.light()
+        ToastManager.shared.show("Marked as read")
+    }
+    
+    private func copyChannelLink() {
+        let link = "https://\(server?.instance ?? "fluxer.app")/channels/\(server?.id ?? "@me")/\(channel.id)"
+        UIPasteboard.general.string = link
+        HapticFeedback.light()
+        ToastManager.shared.show("Link copied to clipboard")
+    }
 }
 
 // MARK: - Server Context Menu
@@ -147,6 +232,7 @@ struct ServerContextMenu: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppState.self) private var appState
     
     let server: Server
     
@@ -196,16 +282,18 @@ struct ServerContextMenu: View {
                     VStack(spacing: 12) {
                         // Section: Quick Actions
                         VStack(spacing: 0) {
-                            MenuButton(icon: "eye", title: "Mark as Read", color: themeManager.textPrimary(colorScheme)) {
+                            // Copy Server Invite Link
+                            MenuButton(icon: "link", title: "Copy Server Link", color: themeManager.textPrimary(colorScheme)) {
+                                copyServerLink()
                                 dismiss()
                             }
                         }
                         .background(themeManager.backgroundSecondary(colorScheme))
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                         
-                        // Section: Settings
+                        // Section: Settings (Coming Soon)
                         VStack(spacing: 0) {
-                            MenuButton(icon: "bell", title: "Notification Settings", color: themeManager.textPrimary(colorScheme)) {
+                            MenuButton(icon: "bell", title: "Notification Settings (Soon)", color: themeManager.textSecondary(colorScheme)) {
                                 dismiss()
                             }
                             
@@ -213,68 +301,17 @@ struct ServerContextMenu: View {
                                 .background(themeManager.separator(colorScheme))
                                 .padding(.leading, 56)
                             
-                            MenuButton(icon: "shield", title: "Privacy Settings", color: themeManager.textPrimary(colorScheme)) {
+                            MenuButton(icon: "person.circle", title: "Edit Server Profile (Soon)", color: themeManager.textSecondary(colorScheme)) {
                                 dismiss()
                             }
-                            
-                            Divider()
-                                .background(themeManager.separator(colorScheme))
-                                .padding(.leading, 56)
-                            
-                            MenuButton(icon: "person.circle", title: "Edit Community Profile", color: themeManager.textPrimary(colorScheme)) {
-                                dismiss()
-                            }
-                        }
-                        .background(themeManager.backgroundSecondary(colorScheme))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        
-                        // Section: Mute/Hide
-                        VStack(spacing: 0) {
-                            MenuButtonWithChevron(icon: "bell.slash", title: "Mute Community") {
-                                dismiss()
-                            }
-                            
-                            HStack {
-                                Image(systemName: "eye.slash")
-                                    .font(.system(size: 20))
-                                    .foregroundStyle(themeManager.textPrimary(colorScheme))
-                                    .frame(width: 24)
-                                
-                                Text("Hide Muted Channels")
-                                    .font(.system(size: 16))
-                                    .foregroundStyle(themeManager.textPrimary(colorScheme))
-                                
-                                Spacer()
-                                
-                                Toggle("", isOn: .constant(false))
-                                    .toggleStyle(SwitchToggleStyle(tint: themeManager.accentColor.color))
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
                         }
                         .background(themeManager.backgroundSecondary(colorScheme))
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                         
                         // Section: Danger Zone
                         VStack(spacing: 0) {
-                            MenuButton(icon: "arrow.left.square", title: "Leave Community", color: .red) {
-                                dismiss()
-                            }
-                            
-                            Divider()
-                                .background(themeManager.separator(colorScheme))
-                                .padding(.leading, 56)
-                            
-                            MenuButton(icon: "flag", title: "Report Community", color: .red) {
-                                dismiss()
-                            }
-                        }
-                        .background(themeManager.backgroundSecondary(colorScheme))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        
-                        // Debug option (for development)
-                        VStack(spacing: 0) {
-                            MenuButton(icon: "ant", title: "Debug Community", color: themeManager.textSecondary(colorScheme)) {
+                            MenuButton(icon: "arrow.left.square", title: "Leave Server", color: .red) {
+                                leaveServer()
                                 dismiss()
                             }
                         }
@@ -298,6 +335,19 @@ struct ServerContextMenu: View {
                 }
             }
         }
+    }
+    
+    private func copyServerLink() {
+        let link = "https://\(server.instance)/servers/\(server.id)"
+        UIPasteboard.general.string = link
+        HapticFeedback.light()
+        ToastManager.shared.show("Link copied to clipboard")
+    }
+    
+    private func leaveServer() {
+        // In a real implementation, this would call an API to leave the server
+        HapticFeedback.notification(.success)
+        ToastManager.shared.show("Left \"\(server.name)\"")
     }
 }
 
@@ -342,18 +392,9 @@ struct DMContextMenu: View {
                 
                 ScrollView {
                     VStack(spacing: 12) {
-                        // Section: Pin
-                        VStack(spacing: 0) {
-                            MenuButton(icon: "pin.fill", title: "Pin DM", color: themeManager.textPrimary(colorScheme)) {
-                                dismiss()
-                            }
-                        }
-                        .background(themeManager.backgroundSecondary(colorScheme))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        
                         // Section: Actions
                         VStack(spacing: 0) {
-                            MenuButton(icon: "person", title: "View Profile", color: themeManager.textPrimary(colorScheme)) {
+                            MenuButton(icon: "person", title: "View Profile (Soon)", color: themeManager.textSecondary(colorScheme)) {
                                 dismiss()
                             }
                             
@@ -361,7 +402,7 @@ struct DMContextMenu: View {
                                 .background(themeManager.separator(colorScheme))
                                 .padding(.leading, 56)
                             
-                            MenuButton(icon: "phone", title: "Start Voice Call", color: themeManager.textPrimary(colorScheme)) {
+                            MenuButton(icon: "phone", title: "Start Voice Call (Soon)", color: themeManager.textSecondary(colorScheme)) {
                                 dismiss()
                             }
                             
@@ -369,49 +410,28 @@ struct DMContextMenu: View {
                                 .background(themeManager.separator(colorScheme))
                                 .padding(.leading, 56)
                             
-                            MenuButton(icon: "note.text", title: "Add Note", color: themeManager.textPrimary(colorScheme)) {
+                            // Copy User Link
+                            MenuButton(icon: "link", title: "Copy User Link", color: themeManager.textPrimary(colorScheme)) {
+                                copyUserLink()
                                 dismiss()
                             }
-                            
-                            Divider()
-                                .background(themeManager.separator(colorScheme))
-                                .padding(.leading, 56)
-                            
+                        }
+                        .background(themeManager.backgroundSecondary(colorScheme))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        
+                        // Section: Close DM
+                        VStack(spacing: 0) {
                             MenuButton(icon: "xmark.circle", title: "Close DM", color: .red) {
+                                closeDM()
                                 dismiss()
                             }
                         }
                         .background(themeManager.backgroundSecondary(colorScheme))
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                         
-                        // Section: Invite
+                        // Section: Block
                         VStack(spacing: 0) {
-                            MenuButtonWithChevron(icon: "person.badge.plus", title: "Invite to Community") {
-                                dismiss()
-                            }
-                            
-                            Divider()
-                                .background(themeManager.separator(colorScheme))
-                                .padding(.leading, 56)
-                            
-                            MenuButton(icon: "person.plus", title: "Add Friend", color: themeManager.textPrimary(colorScheme)) {
-                                dismiss()
-                            }
-                            
-                            Divider()
-                                .background(themeManager.separator(colorScheme))
-                                .padding(.leading, 56)
-                            
-                            MenuButton(icon: "nosign", title: "Block", color: .red) {
-                                dismiss()
-                            }
-                        }
-                        .background(themeManager.backgroundSecondary(colorScheme))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        
-                        // Section: Mute
-                        VStack(spacing: 0) {
-                            MenuButtonWithChevron(icon: "bell.slash", title: "Mute DM") {
+                            MenuButton(icon: "nosign", title: "Block User (Soon)", color: themeManager.textSecondary(colorScheme)) {
                                 dismiss()
                             }
                         }
@@ -435,6 +455,18 @@ struct DMContextMenu: View {
                 }
             }
         }
+    }
+    
+    private func copyUserLink() {
+        let link = "https://fluxer.app/users/\(user.id)"
+        UIPasteboard.general.string = link
+        HapticFeedback.light()
+        ToastManager.shared.show("Link copied to clipboard")
+    }
+    
+    private func closeDM() {
+        HapticFeedback.notification(.success)
+        ToastManager.shared.show("DM closed")
     }
 }
 

@@ -436,6 +436,32 @@ struct Channel: Identifiable, Decodable, Equatable {
     ]
 }
 
+// MARK: - DM / Relationship API responses
+
+struct DMChannelResponse: Identifiable, Decodable {
+    let id: String
+    let type: Int
+    let recipients: [User]
+    let lastMessageId: String?
+}
+
+/// type: 1=friend, 2=blocked, 3=incoming request, 4=outgoing request
+struct RelationshipResponse: Identifiable, Decodable {
+    let id: String
+    let type: Int
+    let user: User
+    var isFriend: Bool { type == 1 }
+}
+
+struct GuildMemberResponse: Decodable {
+    let user: User?
+    let nick: String?
+
+    var displayName: String {
+        nick ?? user?.formattedName ?? "Unknown"
+    }
+}
+
 // MARK: - Message
 struct Message: Identifiable, Codable, Equatable {
     let id: String

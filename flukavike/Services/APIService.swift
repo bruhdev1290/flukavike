@@ -27,6 +27,27 @@ class APIService {
     
     private var baseURL: String { apiBaseURL }
 
+    /// CDN base URL, falling back to the canonical Fluxer CDN if discovery hasn't run.
+    var resolvedCDNURL: String {
+        cdnURL.isEmpty ? "https://cdn.fluxer.app" : cdnURL
+    }
+
+    /// Builds a full CDN URL for a user avatar hash.
+    func avatarURL(userId: String, hash: String?) -> URL? {
+        guard let hash, !hash.isEmpty else { return nil }
+        if hash.hasPrefix("http") { return URL(string: hash) }
+        let ext = hash.hasPrefix("a_") ? "gif" : "webp"
+        return URL(string: "\(resolvedCDNURL)/avatars/\(userId)/\(hash).\(ext)")
+    }
+
+    /// Builds a full CDN URL for a server icon hash.
+    func serverIconURL(serverId: String, hash: String?) -> URL? {
+        guard let hash, !hash.isEmpty else { return nil }
+        if hash.hasPrefix("http") { return URL(string: hash) }
+        let ext = hash.hasPrefix("a_") ? "gif" : "webp"
+        return URL(string: "\(resolvedCDNURL)/icons/\(serverId)/\(hash).\(ext)")
+    }
+
     private var activeAuthToken: String? {
         WebAuthService.shared.authToken ?? authToken
     }
@@ -530,7 +551,7 @@ class APIService {
         )
     }
     
-    private func makeRequest(
+    func makeRequest(
         endpoint: String,
         method: String = "GET",
         body: Data? = nil,
@@ -626,7 +647,32 @@ class APIService {
     }
     
     // MARK: - User Endpoints
-    
+
+    /// Returns the user's open DM channels (type 1 = DM, type 3 = group DM).
+    func getUserDMChannels() async throws -> [DMChannelResponse] {
+        let data = try await makeRequest(endpoint: "/users/@me/channels")
+        return try JSONDecoder.flukavike.decode([DMChannelResponse].self, from: data)
+    }
+
+    /// Opens (or returns an existing) DM channel with the given user.
+    func openDMChannel(userId: String) async throws -> DMChannelResponse {
+        let body = try JSONEncoder().encode(["recipient_id": userId])
+        let data = try await makeRequest(endpoint: "/users/@me/channels", method: "POST", body: body)
+        return try JSONDecoder.flukavike.decode(DMChannelResponse.self, from: data)
+    }
+
+    /// Returns the current user's relationships (friends, blocked, pending).
+    func getUserRelationships() async throws -> [RelationshipResponse] {
+        let data = try await makeRequest(endpoint: "/users/@me/relationships")
+        return try JSONDecoder.flukavike.decode([RelationshipResponse].self, from: data)
+    }
+
+    /// Returns members of a guild. limit max is typically 1000.
+    func getGuildMembers(guildId: String, limit: Int = 100) async throws -> [GuildMemberResponse] {
+        let data = try await makeRequest(endpoint: "/guilds/\(guildId)/members?limit=\(limit)")
+        return try JSONDecoder.flukavike.decode([GuildMemberResponse].self, from: data)
+    }
+
     func getCurrentUser() async throws -> User {
         let data = try await makeRequest(endpoint: "/users/@me")
         return try JSONDecoder.flukavike.decode(User.self, from: data)
@@ -641,6 +687,25 @@ class APIService {
         return guilds
     }
     
+    // MARK: - Invite / Join Server
+
+    /// Joins a server via an invite code. Returns the joined server.
+    func joinServer(inviteCode: String) async throws -> Server {
+        let code = inviteCode
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "https://", with: "")
+            .replacingOccurrences(of: "http://", with: "")
+            .components(separatedBy: "/").last ?? inviteCode
+        let data = try await makeRequest(endpoint: "/invites/\(code)", method: "POST")
+        // Fluxer returns { "guild": {...} } or the server directly
+        if let server = try? JSONDecoder.flukavike.decode(Server.self, from: data) {
+            return server
+        }
+        struct InviteResponse: Decodable { let guild: Server }
+        let response = try JSONDecoder.flukavike.decode(InviteResponse.self, from: data)
+        return response.guild
+    }
+
     // MARK: - Guild Endpoints
     
     func getGuild(id: String) async throws -> Server {
@@ -687,9 +752,15 @@ class APIService {
         return try JSONDecoder.flukavike.decode([Message].self, from: data)
     }
     
-    func sendMessage(channelId: String, content: String) async throws -> Message {
-        let body = ["content": content]
-        let bodyData = try JSONEncoder().encode(body)
+    func sendMessage(channelId: String, content: String, replyToId: String? = nil) async throws -> Message {
+        var body: [String: Any] = ["content": content]
+        if let replyToId = replyToId {
+            body["message_reference"] = [
+                "message_id": replyToId,
+                "channel_id": channelId
+            ]
+        }
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
         let data = try await makeRequest(
             endpoint: "/channels/\(channelId)/messages",
             method: "POST",
@@ -698,6 +769,41 @@ class APIService {
         return try JSONDecoder.flukavike.decode(Message.self, from: data)
     }
     
+    func sendMessageWithAttachment(
+        channelId: String,
+        content: String,
+        imageData: Data,
+        filename: String,
+        mimeType: String
+    ) async throws -> Message {
+        let boundary = UUID().uuidString
+        var request = URLRequest(url: URL(string: "\(baseURL)/channels/\(channelId)/messages")!)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        if let token = activeAuthToken, !token.isEmpty {
+            request.setValue(token, forHTTPHeaderField: "Authorization")
+        }
+        if !webBaseURL.isEmpty {
+            request.setValue(webBaseURL, forHTTPHeaderField: "Origin")
+        }
+        var body = Data()
+        let crlf = "\r\n"
+        func field(_ name: String, _ value: String) {
+            body.append("--\(boundary)\(crlf)".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"\(name)\"\(crlf)\(crlf)".data(using: .utf8)!)
+            body.append("\(value)\(crlf)".data(using: .utf8)!)
+        }
+        if !content.isEmpty { field("content", content) }
+        body.append("--\(boundary)\(crlf)".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"files[0]\"; filename=\"\(filename)\"\(crlf)".data(using: .utf8)!)
+        body.append("Content-Type: \(mimeType)\(crlf)\(crlf)".data(using: .utf8)!)
+        body.append(imageData)
+        body.append("\(crlf)--\(boundary)--\(crlf)".data(using: .utf8)!)
+        request.httpBody = body
+        let (data, _) = try await URLSession.shared.data(for: request)
+        return try JSONDecoder.flukavike.decode(Message.self, from: data)
+    }
+
     func sendVoiceMessage(
         channelId: String,
         audioURL: URL,
@@ -820,7 +926,7 @@ class APIService {
     // MARK: - Voice Endpoints
     
     func getVoiceToken(channelId: String) async throws -> VoiceTokenResponse {
-        let data = try await makeRequest(endpoint: "/channels/\(channelId)/voice-token")
+        let data = try await makeRequest(endpoint: "/channels/\(channelId)/voice/token", method: "POST")
         return try JSONDecoder.flukavike.decode(VoiceTokenResponse.self, from: data)
     }
     

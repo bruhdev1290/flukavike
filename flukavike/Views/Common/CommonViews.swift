@@ -10,59 +10,101 @@ struct AvatarView: View {
     let user: User
     let size: CGFloat
     var showStatus: Bool = true
-    
+
     @Environment(ThemeManager.self) private var themeManager
     @Environment(\.colorScheme) private var colorScheme
-    
+
+    private var resolvedURL: URL? {
+        APIService.shared.avatarURL(userId: user.id, hash: user.avatarUrl)
+    }
+
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            // Avatar Image or Initials
-            if let avatarUrl = user.avatarUrl {
-                AsyncImage(url: URL(string: avatarUrl)) { image in
-                    image
-                        .resizable()
-                        .scaledToFill()
-                } placeholder: {
-                    placeholder
+            if let url = resolvedURL {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                            .frame(width: size, height: size)
+                            .clipShape(Circle())
+                    default:
+                        placeholder
+                    }
                 }
             } else {
                 placeholder
             }
-            
-            // Status Indicator
+
             if showStatus {
                 Circle()
                     .fill(user.status.color)
                     .frame(width: size * 0.3, height: size * 0.3)
-                    .overlay(
-                        Circle()
-                            .stroke(themeManager.backgroundPrimary(colorScheme), lineWidth: 2)
-                    )
+                    .overlay(Circle().stroke(themeManager.backgroundPrimary(colorScheme), lineWidth: 2))
                     .offset(x: 2, y: 2)
             }
         }
         .frame(width: size, height: size)
     }
-    
+
     private var placeholder: some View {
         ZStack {
             Circle()
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            themeManager.accentColor.color.opacity(0.7),
-                            themeManager.accentColor.color.opacity(0.3)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-            
+                .fill(LinearGradient(
+                    colors: [themeManager.accentColor.color.opacity(0.7),
+                             themeManager.accentColor.color.opacity(0.3)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                ))
             Text(user.formattedName.prefix(1).uppercased())
                 .font(.system(size: size * 0.4, weight: .semibold))
                 .foregroundStyle(.white)
         }
         .clipShape(Circle())
+        .frame(width: size, height: size)
+    }
+}
+
+// MARK: - Server Icon View
+struct ServerIconView: View {
+    let server: Server
+    let size: CGFloat
+    var cornerRadius: CGFloat = 12
+
+    @Environment(ThemeManager.self) private var themeManager
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var resolvedURL: URL? {
+        APIService.shared.serverIconURL(serverId: server.id, hash: server.iconUrl)
+    }
+
+    var body: some View {
+        Group {
+            if let url = resolvedURL {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                            .frame(width: size, height: size)
+                            .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+                    default:
+                        placeholder
+                    }
+                }
+            } else {
+                placeholder
+            }
+        }
+        .frame(width: size, height: size)
+    }
+
+    private var placeholder: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .fill(themeManager.accentColor.color.opacity(0.2))
+            Text(server.name.prefix(1).uppercased())
+                .font(.system(size: size * 0.4, weight: .bold))
+                .foregroundStyle(themeManager.accentColor.color)
+        }
+        .frame(width: size, height: size)
     }
 }
 

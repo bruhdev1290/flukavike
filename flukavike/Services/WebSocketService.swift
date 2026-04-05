@@ -42,6 +42,12 @@ class WebSocketService: NSObject {
     var onSpeaking: ((String, Bool) -> Void)?
     var onNotification: ((AppNotification) -> Void)?
     var onConnectionStateChange: ((ConnectionState) -> Void)?
+
+    /// The last guild ID seen in READY or guild events — used for voice state update op 4.
+    var currentGuildId: String?
+
+    // Pending continuations waiting for VOICE_SERVER_UPDATE
+    private var voiceServerContinuations: [String: CheckedContinuation<VoiceServerUpdate, Error>] = [:]
     
     enum ConnectionState: Equatable {
         case disconnected
@@ -244,6 +250,15 @@ class WebSocketService: NSObject {
                     self?.onVoiceStateUpdate?(state)
                 }
             }
+
+        case "VOICE_SERVER_UPDATE":
+            if let update = try? decode(VoiceServerUpdate.self, from: eventData) {
+                let channelId = update.channelId ?? update.guildId ?? ""
+                DispatchQueue.main.async { [weak self] in
+                    self?.voiceServerContinuations[channelId]?.resume(returning: update)
+                    self?.voiceServerContinuations.removeValue(forKey: channelId)
+                }
+            }
             
         case "SPEAKING":
             if let userId = eventData["user_id"] as? String,
@@ -427,8 +442,26 @@ class WebSocketService: NSObject {
                 "self_deaf": selfDeaf
             ]
         ]
-        
         sendJSON(voiceState)
+    }
+
+    /// Send op 4 to join a voice channel.
+    func sendVoiceStateUpdate(channelId: String, guildId: String?) {
+        updateVoiceState(guildId: guildId, channelId: channelId)
+    }
+
+    /// Leave the current voice channel by sending op 4 with channel_id: null.
+    func sendVoiceLeave(guildId: String?) {
+        updateVoiceState(guildId: guildId, channelId: nil)
+    }
+
+    /// Await a VOICE_SERVER_UPDATE event for a given channel (or guild) ID.
+    func waitForVoiceServerUpdate(channelId: String) async throws -> VoiceServerUpdate {
+        return try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.main.async { [weak self] in
+                self?.voiceServerContinuations[channelId] = continuation
+            }
+        }
     }
     
     // MARK: - Helpers

@@ -25,12 +25,12 @@ This project follows these design principles:
 |---------|-------------|
 | 🎨 **Theme System** | Light, Dark, OLED Dark modes with 10 accent colors |
 | 🏠 **Home Screen** | Server pills, pinned channels, recent conversations |
-| 💬 **Chat Interface** | Message bubbles, reactions, typing indicators, voice messages, rich attachments |
+| 💬 **Chat Interface** | Message bubbles, reactions, typing indicators, voice messages, rich attachments, inline replies, channel mentions |
 | 📱 **Navigation** | Customizable tab bar with floating compose button |
 | 🔔 **Notifications** | Push notifications with mentions, DMs, calls |
 | 📞 **Voice/Video Calls** | CallKit integration for calls |
 | 🖥 **Screen Sharing** | Broadcast extension for screen sharing |
-| 🔊 **Voice Channels** | Join voice channels with video support, Siri voice commands |
+| 🔊 **Voice Channels** | Join voice channels with video support, participant tracking, LiveKit integration, Siri voice commands |
 | 👤 **Profile** | User profiles with stats, tabs, and customization |
 | ⚙️ **Settings** | Comprehensive settings with appearance options |
 | 🚀 **Onboarding** | Welcome flow with instance selection |
@@ -41,7 +41,10 @@ This project follows these design principles:
 ### Design Highlights
 
 - **Hexagon Branding**: Fluxer logo-inspired shapes throughout
-- **Custom Context Menus**: Long-press to reveal actions
+- **Inline Replies**: Long-press any message to reply
+- **Channel Mentions**: Type `<#channelId>` to create clickable channel links with live previews
+- **Custom Context Menus**: Long-press channels/servers for quick actions (star, copy link, etc.)
+- **Toast Notifications**: Visual feedback for actions
 - **Smooth Animations**: Spring-based transitions
 - **Haptic Feedback**: Tactile responses for interactions
 - **Adaptive Colors**: Dynamic text and background colors
@@ -79,7 +82,7 @@ FluxerMockup/
 │   │   ├── HomeView.swift       # Home dashboard
 │   │   └── ChannelListView.swift # Channel browser
 │   ├── Chat/
-│   │   └── ChatView.swift       # Message interface
+│   │   └── ChatView.swift       # Message interface with inline replies
 │   ├── Call/
 │   │   ├── CallView.swift       # Active call UI
 │   │   └── VoiceChannelView.swift # Voice channel grid
@@ -92,7 +95,8 @@ FluxerMockup/
 │   ├── Settings/
 │   │   └── SettingsView.swift
 │   └── Common/
-│       └── CommonViews.swift    # Shared UI components
+│       ├── CommonViews.swift    # Shared UI components
+│       └── ContextMenus.swift   # Channel/server/DM context menus
 ├── FluxerBroadcastExtension/    # Screen sharing extension
 │   ├── SampleHandler.swift
 │   └── Info.plist
@@ -219,6 +223,63 @@ The channel loading flow is:
 
 ---
 
+## 📝 Recent Updates
+
+### Inline Message Replies
+Long-press any message in a chat channel to initiate a reply. The reply preview appears above the input field showing the author and message content. Replies are linked to the original message and displayed with a "Replying to" indicator.
+
+**How it works:**
+- Long-press a message → Reply preview appears
+- Type your reply → Send
+- Original sender sees your reply with context
+
+### Channel Mentions (Embedded Links)
+Messages containing channel references (in Discord format `<#channelId>`) automatically render as clickable channel pills. Clicking a channel mention opens a preview of that channel without leaving the current conversation.
+
+**Features:**
+- Auto-detects channel mentions in message text
+- Shows channel name with icon (text # or voice 🔊)
+- Styled with accent color for visibility
+- Click to open channel in a sheet overlay
+- Works with channels from any server you're in
+
+### Voice Channel Participant Tracking
+Voice channels now properly display all participants in the channel, not just yourself.
+
+**Features:**
+- See existing participants when joining
+- Real-time updates when users join/leave
+- Speaking indicators update in real-time
+- Mute/deafen status shown per participant
+
+### Improved Context Menus
+Long-press on channels or servers now shows functional, relevant options:
+
+**Channel Menu:**
+- ⭐ Star/Unstar channel (functional)
+- 📋 Copy channel link (functional)
+- 👁️ Mark as read (functional)
+- 🔕 Mute channel (coming soon)
+- ℹ️ Channel topic display
+
+**Server Menu:**
+- 📋 Copy server link (functional)
+- 🚪 Leave server (visual feedback)
+- ⚙️ Server settings (coming soon)
+
+**DM Menu:**
+- 📋 Copy user link (functional)
+- ❌ Close DM (visual feedback)
+- 👤 View profile (coming soon)
+
+### Toast Notification System
+All actions now provide visual feedback via toast notifications that appear at the bottom of the screen:
+- "Channel starred"
+- "Link copied to clipboard"
+- "Marked as read"
+
+---
+
 ## 🛠 Roadmap
 
 ### Phase 1: Core (Current)
@@ -239,6 +300,10 @@ The channel loading flow is:
 - [x] Push notifications
 - [x] CallKit integration
 - [x] Screen sharing
+- [x] Inline message replies
+- [x] Voice channel participant tracking
+- [x] Toast notification system
+- [x] Channel mention embeds
 - [ ] Sound effects
 - [ ] Widgets
 

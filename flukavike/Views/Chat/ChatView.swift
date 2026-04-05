@@ -5,6 +5,7 @@
 
 import SwiftUI
 import Combine
+import PhotosUI
 
 struct ChatView: View {
     @Environment(ThemeManager.self) private var themeManager
@@ -24,6 +25,29 @@ struct ChatView: View {
     @State private var isRecordingVoice: Bool = false
     @State private var voiceRecording: VoiceMessageRecording?
     @FocusState private var isInputFocused: Bool
+
+    // Image / attachment picker
+    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var showPhotoPicker: Bool = false
+
+    // Lightbox
+    @State private var lightboxURL: IdentifiableURL?
+
+    // In-channel search
+    @State private var showChannelSearch: Bool = false
+    @State private var channelSearchQuery: String = ""
+    
+    // Reply to message
+    @State private var replyingToMessage: Message? = nil
+
+    // Starred state (backed by StarredChannelsManager)
+    @State private var isPinned: Bool = false
+
+    /// Server name resolved via REST servers (proper names) then gateway guilds as fallback.
+    private var resolvedServerName: String {
+        let name = appState.serverName(for: channel.serverId)
+        return name.isEmpty ? channel.serverId : name
+    }
     
     private let audioRecorder = AudioRecorderService.shared
     private let audioPlayer = AudioPlayerService.shared
@@ -58,9 +82,22 @@ struct ChatView: View {
                                 .padding(.vertical, 16)
                         }
                         
-                        ForEach(messages) { message in
-                            DiscordMessageBubble(message: message)
-                                .id(message.id)
+                        let visibleMessages = channelSearchQuery.isEmpty ? messages :
+                            messages.filter { $0.content.localizedCaseInsensitiveContains(channelSearchQuery) ||
+                                $0.author.formattedName.localizedCaseInsensitiveContains(channelSearchQuery) }
+                        ForEach(visibleMessages) { message in
+                            DiscordMessageBubble(
+                                message: message,
+                                onImageTap: { url in
+                                    lightboxURL = IdentifiableURL(url)
+                                },
+                                onReply: {
+                                    replyingToMessage = message
+                                    isInputFocused = true
+                                    HapticFeedback.medium()
+                                }
+                            )
+                            .id(message.id)
                         }
                         
                         // Typing Indicator
@@ -90,16 +127,53 @@ struct ChatView: View {
                 }
             }
             
+            // In-channel search bar
+            if showChannelSearch {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(themeManager.textTertiary(colorScheme))
+                    TextField("Search messages...", text: $channelSearchQuery)
+                        .font(.system(size: 15))
+                        .foregroundStyle(themeManager.textPrimary(colorScheme))
+                    if !channelSearchQuery.isEmpty {
+                        Button(action: { channelSearchQuery = "" }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(themeManager.textTertiary(colorScheme))
+                        }
+                    }
+                    Button(action: { showChannelSearch = false; channelSearchQuery = "" }) {
+                        Text("Cancel").font(.system(size: 15))
+                            .foregroundStyle(themeManager.accentColor.color)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(themeManager.backgroundSecondary(colorScheme))
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
+            // Reply Preview
+            if let replyingTo = replyingToMessage {
+                ReplyPreviewView(
+                    message: replyingTo,
+                    onCancel: { replyingToMessage = nil }
+                )
+                .environment(themeManager)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            
             // Input Area
             DiscordInputView(
                 text: $messageText,
                 isTyping: $isTyping,
                 isSending: $isSending,
                 isRecording: $isRecordingVoice,
+                replyingTo: $replyingToMessage,
                 onSend: sendMessage,
                 onTyping: sendTypingIndicator,
                 onVoiceRecording: handleVoiceRecording,
-                onVoiceRecordingCancelled: cancelVoiceRecording
+                onVoiceRecordingCancelled: cancelVoiceRecording,
+                onAttachPhoto: { showPhotoPicker = true }
             )
             .focused($isInputFocused)
             
@@ -115,16 +189,48 @@ struct ChatView: View {
         .background(themeManager.backgroundPrimary(colorScheme))
         .navigationTitle("#\(channel.name)")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear { isPinned = StarredChannelsManager.shared.isStarred(channel.id) }
+        .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhotoItem, matching: .any(of: [.images, .videos]))
+        .onChange(of: selectedPhotoItem) { _, item in
+            guard let item else { return }
+            Task {
+                if let data = try? await item.loadTransferable(type: Data.self) {
+                    let mimeType = data.sniffMimeType()
+                    let ext = mimeType.components(separatedBy: "/").last ?? "jpg"
+                    let filename = "attachment.\(ext)"
+                    let msg = try? await apiService.sendMessageWithAttachment(
+                        channelId: channel.id,
+                        content: messageText,
+                        imageData: data,
+                        filename: filename,
+                        mimeType: mimeType
+                    )
+                    await MainActor.run {
+                        messageText = ""
+                        selectedPhotoItem = nil
+                        if let msg { messages.append(msg) }
+                    }
+                }
+            }
+        }
+        .sheet(item: $lightboxURL) { item in
+            ImageLightboxView(url: item.url)
+                .environment(themeManager)
+        }
+        .animation(.easeInOut(duration: 0.2), value: showChannelSearch)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 16) {
-                    Button(action: {}) {
-                        Image(systemName: "star")
+                    Button(action: {
+                        isPinned = StarredChannelsManager.shared.toggle(channelId: channel.id, serverName: resolvedServerName)
+                        HapticFeedback.light()
+                    }) {
+                        Image(systemName: isPinned ? "star.fill" : "star")
                             .font(.system(size: 20))
-                            .foregroundStyle(themeManager.textPrimary(colorScheme))
+                            .foregroundStyle(isPinned ? .yellow : themeManager.textPrimary(colorScheme))
                     }
-                    
-                    Button(action: {}) {
+
+                    Button(action: { showChannelSearch.toggle() }) {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 20))
                             .foregroundStyle(themeManager.textPrimary(colorScheme))
@@ -179,12 +285,18 @@ struct ChatView: View {
     private func sendMessage() {
         guard !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let content = messageText
+        let replyToId = replyingToMessage?.id
         messageText = ""
+        replyingToMessage = nil
         isSending = true
         
         Task {
             do {
-                let message = try await apiService.sendMessage(channelId: channel.id, content: content)
+                let message = try await apiService.sendMessage(
+                    channelId: channel.id,
+                    content: content,
+                    replyToId: replyToId
+                )
                 await MainActor.run {
                     self.messages.append(message)
                     self.isSending = false
@@ -316,6 +428,8 @@ struct DiscordMessageBubble: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(\.colorScheme) private var colorScheme
     let message: Message
+    var onImageTap: ((URL) -> Void)?
+    var onReply: (() -> Void)?
     @State private var showActions: Bool = false
     
     var body: some View {
@@ -342,17 +456,28 @@ struct DiscordMessageBubble: View {
                     }
                 }
                 
-                // Content (or Voice Message)
+                // Reply Reference
+                if message.isReply, let _ = message.replyToId {
+                    ReplyReferenceView()
+                }
+                
+                // Content (or Voice Message or Images)
                 if let voiceAttachment = message.attachments.first(where: { $0.isVoiceMessage }) {
-                    VoiceMessageBubble(
-                        attachment: voiceAttachment,
-                        isFromCurrentUser: false
-                    )
+                    VoiceMessageBubble(attachment: voiceAttachment, isFromCurrentUser: false)
                 } else {
-                    Text(message.content)
-                        .font(.system(size: 15))
-                        .foregroundStyle(themeManager.textSecondary(colorScheme))
-                        .lineSpacing(2)
+                    if !message.content.isEmpty {
+                        MessageContentView(content: message.content)
+                            .font(.system(size: 15))
+                            .foregroundStyle(themeManager.textSecondary(colorScheme))
+                    }
+                    let imageAttachments = message.attachments.filter { $0.isImage }
+                    if !imageAttachments.isEmpty {
+                        VStack(spacing: 6) {
+                            ForEach(imageAttachments, id: \.id) { att in
+                                AttachmentImageView(attachment: att, onTap: onImageTap)
+                            }
+                        }
+                    }
                 }
                 
                 // Reactions
@@ -374,7 +499,7 @@ struct DiscordMessageBubble: View {
         .contentShape(Rectangle())
         .onTapGesture {}
         .onLongPressGesture {
-            HapticFeedback.light()
+            onReply?()
         }
     }
     
@@ -472,6 +597,278 @@ struct DiscordTypingIndicator: View {
     }
 }
 
+// MARK: - Message Content View (with Channel Mentions)
+struct MessageContentView: View {
+    let content: String
+    var font: Font = .system(size: 15)
+    
+    var body: some View {
+        // Parse content and build view
+        MessageContentParsedView(content: content, font: font)
+            .lineSpacing(2)
+    }
+}
+
+// MARK: - Parsed Message Content
+struct MessageContentParsedView: View {
+    @Environment(AppState.self) private var appState
+    let content: String
+    let font: Font
+    
+    // Regex pattern for Discord-style channel mentions: <#channelId>
+    private static let channelMentionPattern = try! NSRegularExpression(pattern: "<#(\\d+)>", options: [])
+    
+    var body: some View {
+        let segments = parseSegments()
+        
+        // If no matches, just show the whole text
+        if segments.isEmpty {
+            Text(content)
+                .font(font)
+        } else {
+            // Build the content with inline elements
+            FlowLayout(spacing: 4) {
+                ForEach(segments.indices, id: \.self) { index in
+                    segmentView(for: segments[index])
+                }
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private func segmentView(for segment: ContentSegment) -> some View {
+        switch segment {
+        case .text(let text):
+            Text(text)
+                .font(font)
+        case .channelMention(let channelId):
+            ChannelMentionPill(channelId: channelId)
+        }
+    }
+    
+    private func parseSegments() -> [ContentSegment] {
+        var segments: [ContentSegment] = []
+        let nsRange = NSRange(content.startIndex..., in: content)
+        let matches = MessageContentParsedView.channelMentionPattern.matches(in: content, options: [], range: nsRange)
+        
+        var currentIndex = content.startIndex
+        
+        for match in matches {
+            // Add text before the mention
+            if let matchRange = Range(match.range, in: content) {
+                if currentIndex < matchRange.lowerBound {
+                    let textSegment = String(content[currentIndex..<matchRange.lowerBound])
+                    if !textSegment.isEmpty {
+                        segments.append(.text(textSegment))
+                    }
+                }
+                
+                // Extract channel ID
+                if let channelIdRange = Range(match.range(at: 1), in: content) {
+                    let channelId = String(content[channelIdRange])
+                    segments.append(.channelMention(channelId))
+                }
+                
+                currentIndex = matchRange.upperBound
+            }
+        }
+        
+        // Add remaining text after last match
+        if currentIndex < content.endIndex {
+            let textSegment = String(content[currentIndex..<content.endIndex])
+            if !textSegment.isEmpty {
+                segments.append(.text(textSegment))
+            }
+        }
+        
+        return segments
+    }
+    
+    enum ContentSegment {
+        case text(String)
+        case channelMention(String)
+    }
+}
+
+// MARK: - Flow Layout for Inline Elements
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 4
+    
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let result = FlowResult(in: proposal.width ?? 0, subviews: subviews, spacing: spacing)
+        return result.size
+    }
+    
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = FlowResult(in: bounds.width, subviews: subviews, spacing: spacing)
+        for (index, subview) in subviews.enumerated() {
+            subview.place(at: CGPoint(x: bounds.minX + result.positions[index].x,
+                                      y: bounds.minY + result.positions[index].y),
+                         proposal: .unspecified)
+        }
+    }
+    
+    struct FlowResult {
+        var size: CGSize = .zero
+        var positions: [CGPoint] = []
+        
+        init(in maxWidth: CGFloat, subviews: Subviews, spacing: CGFloat) {
+            var x: CGFloat = 0
+            var y: CGFloat = 0
+            var lineHeight: CGFloat = 0
+            
+            for subview in subviews {
+                let size = subview.sizeThatFits(.unspecified)
+                
+                if x + size.width > maxWidth && x > 0 {
+                    x = 0
+                    y += lineHeight + spacing
+                    lineHeight = 0
+                }
+                
+                positions.append(CGPoint(x: x, y: y))
+                lineHeight = max(lineHeight, size.height)
+                x += size.width + spacing
+            }
+            
+            self.size = CGSize(width: maxWidth, height: y + lineHeight)
+        }
+    }
+}
+
+// MARK: - Channel Mention Pill
+struct ChannelMentionPill: View {
+    @Environment(ThemeManager.self) private var themeManager
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(AppState.self) private var appState
+    let channelId: String
+    
+    @State private var showChannelSheet = false
+    
+    private var channel: Channel? {
+        // Search in all guilds for this channel
+        for server in appState.gatewayGuilds {
+            if let channel = server.channels.first(where: { $0.id == channelId }) {
+                return channel
+            }
+        }
+        return nil
+    }
+    
+    private var server: Server? {
+        for server in appState.gatewayGuilds {
+            if server.channels.contains(where: { $0.id == channelId }) {
+                return server
+            }
+        }
+        return nil
+    }
+    
+    var body: some View {
+        Button(action: {
+            if channel != nil {
+                showChannelSheet = true
+                HapticFeedback.light()
+            }
+        }) {
+            HStack(spacing: 4) {
+                Image(systemName: channel?.type == .voice ? "speaker.wave.2.fill" : "number")
+                    .font(.system(size: 12))
+                Text(channel?.name ?? "unknown-channel")
+                    .font(.system(size: 14, weight: .medium))
+            }
+            .foregroundStyle(themeManager.accentColor.color)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(themeManager.accentColor.color.opacity(0.15))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(themeManager.accentColor.color.opacity(0.3), lineWidth: 1)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .sheet(isPresented: $showChannelSheet) {
+            if let channel = channel {
+                NavigationStack {
+                    ChatView(channel: channel)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Reply Preview View
+struct ReplyPreviewView: View {
+    @Environment(ThemeManager.self) private var themeManager
+    @Environment(\.colorScheme) private var colorScheme
+    let message: Message
+    let onCancel: () -> Void
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            // Reply icon and line
+            HStack(spacing: 4) {
+                Image(systemName: "arrowshape.turn.up.left.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(themeManager.accentColor.color)
+                Rectangle()
+                    .fill(themeManager.accentColor.color.opacity(0.5))
+                    .frame(width: 2, height: 24)
+            }
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Replying to \(message.author.formattedName)")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(themeManager.accentColor.color)
+                
+                Text(message.content.prefix(60))
+                    .font(.system(size: 13))
+                    .foregroundStyle(themeManager.textSecondary(colorScheme))
+                    .lineLimit(1)
+            }
+            
+            Spacer()
+            
+            Button(action: onCancel) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundStyle(themeManager.textTertiary(colorScheme))
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(themeManager.backgroundSecondary(colorScheme))
+    }
+}
+
+// MARK: - Reply Reference View (shown on replied messages)
+struct ReplyReferenceView: View {
+    @Environment(ThemeManager.self) private var themeManager
+    @Environment(\.colorScheme) private var colorScheme
+    
+    var body: some View {
+        HStack(spacing: 8) {
+            Rectangle()
+                .fill(themeManager.textTertiary(colorScheme).opacity(0.5))
+                .frame(width: 2, height: 20)
+            
+            Image(systemName: "arrowshape.turn.up.left")
+                .font(.system(size: 10))
+                .foregroundStyle(themeManager.textTertiary(colorScheme))
+            
+            Text("Replying to message")
+                .font(.system(size: 12))
+                .foregroundStyle(themeManager.textTertiary(colorScheme))
+            
+            Spacer()
+        }
+        .padding(.vertical, 2)
+    }
+}
+
 // MARK: - Discord Input View
 struct DiscordInputView: View {
     @Environment(ThemeManager.self) private var themeManager
@@ -480,11 +877,15 @@ struct DiscordInputView: View {
     @Binding var isTyping: Bool
     @Binding var isSending: Bool
     @Binding var isRecording: Bool
+    @Binding var replyingTo: Message?
     
     var onSend: () -> Void
     var onTyping: () -> Void
     var onVoiceRecording: (Bool) -> Void
     var onVoiceRecordingCancelled: () -> Void
+    var onAttachPhoto: () -> Void = {}
+
+    @State private var showEmojiPicker: Bool = false
     
     @State private var lastTypingSent: Date = .distantPast
     
@@ -495,10 +896,10 @@ struct DiscordInputView: View {
             
             HStack(spacing: 12) {
                 // Plus/Attachment Button
-                Button(action: {}) {
+                Button(action: onAttachPhoto) {
                     Image(systemName: "plus")
                         .font(.system(size: 24, weight: .medium))
-                        .foregroundStyle(themeManager.textTertiary(colorScheme))
+                        .foregroundStyle(themeManager.accentColor.color)
                 }
                 
                 // Text Field Container
@@ -524,13 +925,23 @@ struct DiscordInputView: View {
                 )
                 
                 // Emoji Button
-                Button(action: {}) {
+                Button(action: { showEmojiPicker.toggle() }) {
                     Image(systemName: "face.smiling")
                         .font(.system(size: 24))
-                        .foregroundStyle(themeManager.textTertiary(colorScheme))
+                        .foregroundStyle(showEmojiPicker ? themeManager.accentColor.color : themeManager.textTertiary(colorScheme))
                 }
-                
-                // Microphone Button (when text is empty)
+                .sheet(isPresented: $showEmojiPicker) {
+                    EmojiPickerPopover { emoji in
+                        text += emoji
+                        showEmojiPicker = false
+                    }
+                    .environment(themeManager)
+                    .presentationDetents([.height(340)])
+                    .presentationDragIndicator(.visible)
+                    .presentationBackground(.regularMaterial)
+                }
+
+                // Send button when typing, mic button when empty
                 if text.isEmpty {
                     Button(action: {}) {
                         Image(systemName: "mic")
@@ -554,6 +965,13 @@ struct DiscordInputView: View {
                                 }
                             }
                     )
+                } else {
+                    Button(action: onSend) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 30))
+                            .foregroundStyle(themeManager.accentColor.color)
+                    }
+                    .transition(.scale.combined(with: .opacity))
                 }
             }
             .padding(.horizontal, 12)
@@ -757,6 +1175,243 @@ enum HapticFeedback {
     static func notification(_ type: UINotificationFeedbackGenerator.FeedbackType) {
         let generator = UINotificationFeedbackGenerator()
         generator.notificationOccurred(type)
+    }
+}
+
+// MARK: - Attachment Image View (handles static images; GIF note below)
+// GIFs: AsyncImage renders only the first frame (SwiftUI limitation).
+// Full GIF animation requires a UIViewRepresentable wrapping UIImageView with animatedImage.
+// For now, GIFs are shown as static — the first frame is still useful context.
+struct AttachmentImageView: View {
+    @Environment(ThemeManager.self) private var themeManager
+    @Environment(\.colorScheme) private var colorScheme
+    let attachment: Attachment
+    var onTap: ((URL) -> Void)?
+
+    // If the direct URL fails, retry with the proxy URL
+    @State private var useProxy: Bool = false
+
+    private var imageURL: URL? {
+        let raw = useProxy ? (attachment.proxyUrl ?? attachment.url) : attachment.url
+        return URL(string: raw) ?? URL(string: raw.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? raw)
+    }
+
+    private var aspectRatio: CGFloat {
+        if let w = attachment.width, let h = attachment.height, h > 0 {
+            return CGFloat(w) / CGFloat(h)
+        }
+        return 16 / 9
+    }
+
+    private var displayHeight: CGFloat { min(260 / aspectRatio, 320) }
+    private var isGIF: Bool { attachment.contentType == "image/gif" }
+
+    var body: some View {
+        Group {
+            if let url = imageURL {
+                if isGIF {
+                    // Use UIImageView for GIF animation support
+                    AnimatedGIFView(url: url, useProxy: useProxy, proxyUrl: attachment.proxyUrl)
+                        .frame(maxWidth: 260)
+                        .frame(height: displayHeight)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .onTapGesture { onTap?(url) }
+                } else {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let img):
+                            img.resizable()
+                                .scaledToFill()
+                                .frame(maxWidth: 260)
+                                .frame(height: displayHeight)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .onTapGesture { onTap?(url) }
+                        case .failure:
+                            if !useProxy, attachment.proxyUrl != nil {
+                                // Retry with proxy URL
+                                Color.clear.frame(height: 0).onAppear { useProxy = true }
+                            } else {
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(themeManager.backgroundTertiary(colorScheme))
+                                    .frame(maxWidth: 260).frame(height: 80)
+                                    .overlay(HStack(spacing: 6) {
+                                        Image(systemName: "photo.badge.exclamationmark")
+                                            .foregroundStyle(themeManager.textTertiary(colorScheme))
+                                        Text(attachment.filename).font(.system(size: 12))
+                                            .foregroundStyle(themeManager.textTertiary(colorScheme)).lineLimit(1)
+                                    })
+                            }
+                        default:
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(themeManager.backgroundTertiary(colorScheme))
+                                .frame(maxWidth: 260).frame(height: displayHeight)
+                                .overlay(ProgressView())
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Animated GIF via UIImageView
+struct AnimatedGIFView: UIViewRepresentable {
+    let url: URL
+    let useProxy: Bool
+    let proxyUrl: String?
+
+    func makeUIView(context: Context) -> UIImageView {
+        let iv = UIImageView()
+        iv.contentMode = .scaleAspectFill
+        iv.clipsToBounds = true
+        load(into: iv, from: url)
+        return iv
+    }
+
+    func updateUIView(_ iv: UIImageView, context: Context) {}
+
+    private func load(into iv: UIImageView, from url: URL) {
+        URLSession.shared.dataTask(with: url) { data, response, _ in
+            if let data, let httpResp = response as? HTTPURLResponse, httpResp.statusCode == 200 {
+                DispatchQueue.main.async { iv.image = animatedImage(from: data) }
+            } else if let fallback = proxyUrl.flatMap({ URL(string: $0) }), fallback != url {
+                // Retry with proxy
+                URLSession.shared.dataTask(with: fallback) { data2, _, _ in
+                    if let data2 {
+                        DispatchQueue.main.async { iv.image = animatedImage(from: data2) }
+                    }
+                }.resume()
+            }
+        }.resume()
+    }
+
+    private func animatedImage(from data: Data) -> UIImage? {
+        guard let src = CGImageSourceCreateWithData(data as CFData, nil) else {
+            return UIImage(data: data)
+        }
+        let count = CGImageSourceGetCount(src)
+        guard count > 1 else { return UIImage(data: data) }
+        var frames: [UIImage] = []
+        var duration: Double = 0
+        for i in 0..<count {
+            guard let cgImg = CGImageSourceCreateImageAtIndex(src, i, nil) else { continue }
+            frames.append(UIImage(cgImage: cgImg))
+            let props = CGImageSourceCopyPropertiesAtIndex(src, i, nil) as? [String: Any]
+            let gifDict = props?[kCGImagePropertyGIFDictionary as String] as? [String: Any]
+            let delay = (gifDict?[kCGImagePropertyGIFUnclampedDelayTime as String] as? Double)
+                ?? (gifDict?[kCGImagePropertyGIFDelayTime as String] as? Double) ?? 0.1
+            duration += max(delay, 0.02)
+        }
+        return UIImage.animatedImage(with: frames, duration: duration)
+    }
+}
+
+// MARK: - Emoji Picker Popover
+struct EmojiPickerPopover: View {
+    @Environment(ThemeManager.self) private var themeManager
+    @Environment(\.colorScheme) private var colorScheme
+    let onSelect: (String) -> Void
+
+    private let categories: [(name: String, emojis: [String])] = [
+        ("Smileys", ["😀","😂","😍","🥰","😎","🤔","😅","😭","😤","🥺","😊","🙂","😋","😜","🤩","🥳","😴","🤯","😡","👻"]),
+        ("Gestures", ["👍","👎","❤️","🔥","✨","🎉","👏","🙌","💪","🤝","✌️","🤞","👋","🫶","💯","🎯","🚀","⭐","💡","🎊"]),
+        ("Animals", ["🐶","🐱","🐭","🐹","🐰","🦊","🐻","🐼","🐨","🐯","🦁","🐸","🐵","🐔","🐧","🐦","🦆","🦅","🦉","🦋"]),
+        ("Food", ["🍕","🍔","🌮","🌯","🍣","🍜","🍦","🎂","🍩","🍪","🍫","🍿","☕","🧋","🥤","🍺","🥂","🍷","🥃","🍵"]),
+        ("Symbols", ["❤️","🧡","💛","💚","💙","💜","🖤","🤍","❤️‍🔥","💔","✅","❌","⚡","💥","🌈","🌟","💫","❄️","🌊","🎵"])
+    ]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(categories, id: \.name) { cat in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(cat.name)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(themeManager.textTertiary(colorScheme))
+                                .padding(.horizontal, 12)
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 8), spacing: 4) {
+                                ForEach(cat.emojis, id: \.self) { emoji in
+                                    Button(action: { onSelect(emoji) }) {
+                                        Text(emoji).font(.system(size: 26))
+                                            .frame(width: 38, height: 38)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 8)
+                        }
+                    }
+                }
+                .padding(.vertical, 12)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 280)
+    }
+}
+
+// MARK: - Identifiable URL wrapper
+struct IdentifiableURL: Identifiable {
+    let id = UUID()
+    let url: URL
+    init(_ url: URL) { self.url = url }
+}
+
+// MARK: - Image Lightbox
+struct ImageLightboxView: View {
+    @Environment(ThemeManager.self) private var themeManager
+    @Environment(\.dismiss) private var dismiss
+    let url: URL
+    @State private var scale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black.ignoresSafeArea()
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable()
+                        .scaledToFit()
+                        .scaleEffect(scale)
+                        .offset(offset)
+                        .gesture(MagnificationGesture()
+                            .onChanged { scale = max(1, $0) }
+                            .onEnded { _ in withAnimation { if scale < 1.1 { scale = 1; offset = .zero } } }
+                        )
+                        .gesture(DragGesture()
+                            .onChanged { if scale > 1 { offset = $0.translation } }
+                            .onEnded { _ in if scale <= 1 { withAnimation { offset = .zero } } }
+                        )
+                default:
+                    ProgressView().tint(.white)
+                }
+            }
+            Button(action: { dismiss() }) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 30))
+                    .foregroundStyle(.white.opacity(0.8))
+                    .padding()
+            }
+        }
+    }
+}
+
+// MARK: - Data MIME sniffing
+extension Data {
+    func sniffMimeType() -> String {
+        var b: UInt8 = 0
+        copyBytes(to: &b, count: 1)
+        switch b {
+        case 0xFF: return "image/jpeg"
+        case 0x89: return "image/png"
+        case 0x47: return "image/gif"
+        case 0x52 where count >= 12:
+            let str = String(bytes: prefix(12), encoding: .ascii) ?? ""
+            if str.hasPrefix("RIFF") && str.dropFirst(8).hasPrefix("WEBP") { return "image/webp" }
+        default: break
+        }
+        return "application/octet-stream"
     }
 }
 

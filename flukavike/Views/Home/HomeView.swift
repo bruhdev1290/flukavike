@@ -30,6 +30,7 @@ struct HomeView: View {
         case channel(Channel)
         case serverMenu(Server)
         case channelMenu(Channel)
+        case addServer
         
         var id: String {
             switch self {
@@ -38,6 +39,7 @@ struct HomeView: View {
             case .channel(let c): return "channel-\(c.id)"
             case .serverMenu(let s): return "server-\(s.id)"
             case .channelMenu(let c): return "channelMenu-\(c.id)"
+            case .addServer: return "addServer"
             }
         }
     }
@@ -144,8 +146,14 @@ struct HomeView: View {
                             .environment(themeManager)
                             .environment(appState)
                     case .channel(let channel):
-                        NavigationStack {
-                            ChatView(channel: channel)
+                        if channel.type == .voice {
+                            VoiceChannelView(channel: channel)
+                                .environment(themeManager)
+                                .environment(appState)
+                        } else {
+                            NavigationStack {
+                                ChatView(channel: channel)
+                            }
                         }
                     case .serverMenu(let server):
                         ServerContextMenu(server: server)
@@ -155,6 +163,16 @@ struct HomeView: View {
                         ChannelContextMenu(channel: channel, server: selectedServer)
                             .environment(themeManager)
                             .environment(appState)
+                    case .addServer:
+                        JoinServerView { server in
+                            if !servers.contains(where: { $0.id == server.id }) {
+                                servers.insert(server, at: 0)
+                            }
+                            selectedServer = server
+                            activeSheet = nil
+                        }
+                        .environment(themeManager)
+                        .environment(appState)
                     }
                 }
             }
@@ -175,6 +193,8 @@ struct HomeView: View {
                 // Only use fetched servers if we got real data
                 if !fetched.isEmpty {
                     servers = fetched
+                    appState.restServers = fetched   // store for name resolution elsewhere
+                    ChannelStore.shared.update(guilds: appState.gatewayGuilds, restServers: fetched)
                 } else {
                     // Fallback to preview if API returns empty
                     servers = Server.previewServers
@@ -282,7 +302,7 @@ struct HomeView: View {
                     }
                     
                     // Add Server Button
-                    AddServerPill()
+                    AddServerPill { activeSheet = .addServer }
                 }
                 .padding(.horizontal, 16)
             }
@@ -417,18 +437,8 @@ struct ServerPill: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                // Server Icon
-                ZStack {
-                    Circle()
-                        .fill(themeManager.accentColor.color.opacity(0.2))
-                        .frame(width: 32, height: 32)
-                    
-                    Text(String(server.name.prefix(1)))
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(themeManager.accentColor.color)
-                }
-                
-                // Server Name
+                ServerIconView(server: server, size: 32, cornerRadius: 10)
+
                 Text(server.name)
                     .font(.system(size: 15, weight: isSelected ? .semibold : .medium))
                     .foregroundStyle(isSelected ? themeManager.accentColor.color : themeManager.textPrimary(colorScheme))
@@ -455,9 +465,10 @@ struct ServerPill: View {
 struct AddServerPill: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(\.colorScheme) private var colorScheme
-    
+    let action: () -> Void
+
     var body: some View {
-        Button(action: {}) {
+        Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: "plus")
                     .font(.system(size: 14, weight: .semibold))
@@ -515,16 +526,6 @@ struct HomeChannelRow: View {
                         .frame(width: 8, height: 8)
                 }
                 
-                // Participant count for voice channels
-                if channel.type == .voice {
-                    HStack(spacing: 4) {
-                        Image(systemName: "person.fill")
-                            .font(.system(size: 10))
-                        Text("12")
-                            .font(.system(size: 13, weight: .medium))
-                    }
-                    .foregroundStyle(themeManager.textTertiary(colorScheme))
-                }
             }
         }
         .padding(.vertical, 10)
@@ -546,6 +547,109 @@ struct HomeChannelRow: View {
             return "folder"
         case .announcement:
             return "megaphone"
+        }
+    }
+}
+
+// MARK: - Join Server View
+struct JoinServerView: View {
+    @Environment(ThemeManager.self) private var themeManager
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dismiss) private var dismiss
+
+    let onJoined: (Server) -> Void
+
+    @State private var inviteCode: String = ""
+    @State private var isLoading: Bool = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 24) {
+                VStack(spacing: 8) {
+                    Image(systemName: "person.badge.plus")
+                        .font(.system(size: 48))
+                        .foregroundStyle(themeManager.accentColor.color)
+                    Text("Join a Server")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(themeManager.textPrimary(colorScheme))
+                    Text("Enter an invite link or code to join an existing server.")
+                        .font(.system(size: 15))
+                        .foregroundStyle(themeManager.textSecondary(colorScheme))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                }
+                .padding(.top, 16)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("INVITE LINK OR CODE")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(themeManager.textTertiary(colorScheme))
+                    TextField("e.g. fluxer.app/invite/abc123", text: $inviteCode)
+                        .font(.system(size: 16))
+                        .foregroundStyle(themeManager.textPrimary(colorScheme))
+                        .padding(12)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(themeManager.backgroundTertiary(colorScheme)))
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                }
+                .padding(.horizontal)
+
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.system(size: 14))
+                        .foregroundStyle(.red)
+                        .padding(.horizontal)
+                }
+
+                Button(action: joinServer) {
+                    HStack {
+                        if isLoading { ProgressView().tint(.white) }
+                        Text(isLoading ? "Joining..." : "Join Server")
+                            .font(.system(size: 17, weight: .semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(
+                        inviteCode.trimmingCharacters(in: .whitespaces).isEmpty
+                            ? themeManager.backgroundTertiary(colorScheme)
+                            : themeManager.accentColor.color
+                    ))
+                    .foregroundStyle(inviteCode.trimmingCharacters(in: .whitespaces).isEmpty
+                        ? themeManager.textTertiary(colorScheme) : .white)
+                }
+                .disabled(inviteCode.trimmingCharacters(in: .whitespaces).isEmpty || isLoading)
+                .padding(.horizontal)
+
+                Spacer()
+            }
+            .background(themeManager.backgroundPrimary(colorScheme))
+            .navigationTitle("Add a Server")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }
+                        .foregroundStyle(themeManager.accentColor.color)
+                }
+            }
+        }
+    }
+
+    private func joinServer() {
+        let code = inviteCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !code.isEmpty else { return }
+        isLoading = true
+        errorMessage = nil
+        Task {
+            do {
+                let server = try await APIService.shared.joinServer(inviteCode: code)
+                await MainActor.run { onJoined(server) }
+            } catch {
+                await MainActor.run {
+                    isLoading = false
+                    errorMessage = "Could not join server. Check the invite code and try again."
+                }
+            }
         }
     }
 }

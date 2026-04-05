@@ -275,20 +275,39 @@ struct AttachmentPreview: View {
 struct ChannelPickerView: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
-    
+
     @Binding var selectedServer: Server?
     @Binding var selectedChannel: Channel?
-    
-    @State private var servers: [Server] = Server.previewServers
+
     @State private var searchText: String = ""
-    
+
+    private var filteredServers: [Server] {
+        let servers = appState.gatewayGuilds
+        guard !searchText.isEmpty else { return servers }
+        let q = searchText.lowercased()
+        return servers.compactMap { server in
+            let matchingChannels = server.channels.filter {
+                ($0.type == .text || $0.type == .announcement) &&
+                $0.name.lowercased().contains(q)
+            }
+            if server.name.lowercased().contains(q) || !matchingChannels.isEmpty {
+                return server
+            }
+            return nil
+        }
+    }
+
     var body: some View {
         NavigationStack {
             List {
-                ForEach(servers) { server in
+                ForEach(filteredServers) { server in
                     Section(header: Text(server.name).font(.system(size: 11, weight: .semibold))) {
-                        ForEach(server.channels.filter { $0.type == .text || $0.type == .announcement }) { channel in
+                        let channels = searchText.isEmpty
+                            ? server.channels.filter { $0.type == .text || $0.type == .announcement }
+                            : server.channels.filter { ($0.type == .text || $0.type == .announcement) && $0.name.lowercased().contains(searchText.lowercased()) }
+                        ForEach(channels) { channel in
                             Button(action: {
                                 selectedServer = server
                                 selectedChannel = channel
@@ -337,4 +356,5 @@ struct ChannelPickerView: View {
 #Preview {
     ComposeView()
         .environment(ThemeManager())
+        .environment(AppState())
 }

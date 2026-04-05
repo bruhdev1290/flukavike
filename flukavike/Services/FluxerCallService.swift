@@ -27,11 +27,15 @@ class FlukavikeCallService: NSObject {
     var voiceConnection: VoiceConnection?
     var selectedVoiceChannel: Channel?
     
+    // Voice participants (shared state for UI)
+    @MainActor var voiceParticipants: [VoiceParticipant] = []
+    
     // Callbacks
     var onCallConnected: (() -> Void)?
     var onCallEnded: (() -> Void)?
     var onParticipantJoined: ((VoiceParticipant) -> Void)?
     var onParticipantLeft: ((String) -> Void)?
+    var onParticipantsUpdated: (() -> Void)?
     
     override init() {
         super.init()
@@ -180,58 +184,63 @@ class FlukavikeCallService: NSObject {
     // MARK: - Voice Channel Operations
     
     func joinVoiceChannel(_ channelId: String) async throws {
-        // Get voice token and endpoint from API
-        // GET /channels/{channel.id}/voice-token
-        let voiceInfo = try await apiService?.getVoiceToken(channelId: channelId)
-        
-        guard let voiceInfo = voiceInfo else { return }
-        
-        // Connect to Flukavike voice gateway
-        voiceConnection = VoiceConnection(
-            endpoint: voiceInfo.endpoint,
-            token: voiceInfo.token,
-            sessionId: voiceInfo.sessionId,
-            userId: voiceInfo.userId
-        )
-        
-        try await voiceConnection?.connect()
-        
-        await MainActor.run {
-            self.selectedVoiceChannel = Channel.previewChannels.first { $0.id == channelId }
+        // Step 1: Send gateway op 4 to join the voice channel
+        // The gateway will respond with VOICE_SERVER_UPDATE containing LiveKit token + endpoint
+        guard let ws = webSocketService else { throw VoiceError.notConnected }
+        ws.sendVoiceStateUpdate(channelId: channelId, guildId: webSocketService?.currentGuildId)
+
+        // Step 2: Wait for VOICE_SERVER_UPDATE (up to 5 seconds)
+        let voiceServer = try await withTimeout(seconds: 5) {
+            try await ws.waitForVoiceServerUpdate(channelId: channelId)
+        }
+
+        // Step 3: Connect to LiveKit using the token and endpoint from the gateway
+        let conn = VoiceConnection(endpoint: voiceServer.endpoint, token: voiceServer.token)
+        voiceConnection = conn
+        try await conn.connect()
+
+        await MainActor.run { self.isMuted = false }
+    }
+
+    enum VoiceError: Error {
+        case notConnected
+        case timeout
+    }
+
+    private func withTimeout<T: Sendable>(seconds: Double, operation: @escaping @Sendable () async throws -> T) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await operation() }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                throw VoiceError.timeout
+            }
+            let result = try await group.next()!
+            group.cancelAll()
+            return result
         }
     }
     
     func leaveVoiceChannel() async {
         voiceConnection?.disconnect()
         voiceConnection = nil
-        
-        await MainActor.run {
-            self.selectedVoiceChannel = nil
+        // Tell gateway we left (op 4 with channel_id: null)
+        webSocketService?.sendVoiceLeave(guildId: webSocketService?.currentGuildId)
+        await MainActor.run { 
+            self.selectedVoiceChannel = nil 
+            self.voiceParticipants = []
         }
     }
     
     // MARK: - Call Controls
     
     func toggleMute() async throws {
-        guard let call = activeCall else { return }
-        
         isMuted.toggle()
-        
-        // Update via API
-        // PATCH /calls/{call.id}/mute
-        try await apiService?.updateCallState(
-            callId: call.id,
-            mute: isMuted,
-            video: isVideoEnabled
-        )
-        
-        // Update CallKit
-        let muteAction = CXSetMutedCallAction(
-            call: UUID(uuidString: call.id) ?? UUID(),
-            muted: isMuted
-        )
-        let transaction = CXTransaction(action: muteAction)
-        try? await callController.request(transaction)
+        voiceConnection?.setMute(isMuted)
+        if let call = activeCall {
+            try? await apiService?.updateCallState(callId: call.id, mute: isMuted, video: isVideoEnabled)
+            let muteAction = CXSetMutedCallAction(call: UUID(uuidString: call.id) ?? UUID(), muted: isMuted)
+            try? await callController.request(CXTransaction(action: muteAction))
+        }
     }
     
     func toggleVideo() async throws {
@@ -255,6 +264,22 @@ class FlukavikeCallService: NSObject {
     func toggleDeafen() {
         isDeafened.toggle()
         voiceConnection?.setDeafen(isDeafened)
+    }
+
+    // MARK: - Camera
+
+    func toggleCamera() {
+        isVideoEnabled.toggle()
+        if isVideoEnabled {
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                DispatchQueue.main.async {
+                    if !granted { self.isVideoEnabled = false; return }
+                    self.voiceConnection?.setCamera(true)
+                }
+            }
+        } else {
+            voiceConnection?.setCamera(false)
+        }
     }
     
     // MARK: - Screen Sharing
@@ -306,11 +331,141 @@ class FlukavikeCallService: NSObject {
     }
     
     private func handleVoiceStateUpdate(_ voiceState: VoiceState) {
-        // Update participant list
+        Task { @MainActor in
+            // Channel ID is nil when user leaves the channel
+            guard let channelId = voiceState.channelId else {
+                // User left - remove from participants
+                voiceParticipants.removeAll { $0.id == voiceState.userId }
+                onParticipantLeft?(voiceState.userId)
+                onParticipantsUpdated?()
+                return
+            }
+            
+            // Check if this update is for our current channel
+            guard channelId == selectedVoiceChannel?.id else { return }
+            
+            // Check if participant already exists
+            if let index = voiceParticipants.firstIndex(where: { $0.id == voiceState.userId }) {
+                // Update existing participant
+                let participant = voiceParticipants[index]
+                let updatedParticipant = VoiceParticipant(
+                    id: participant.id,
+                    user: participant.user,
+                    voiceState: voiceState,
+                    isSpeaking: participant.isSpeaking
+                )
+                voiceParticipants[index] = updatedParticipant
+            } else {
+                // New participant - use member info from voice state if available
+                let user: User
+                if let member = voiceState.member, let memberUser = member.user {
+                    user = memberUser
+                } else {
+                    // Create a placeholder user - will be updated when we fetch channel info
+                    user = User(
+                        id: voiceState.userId,
+                        username: "user_\(voiceState.userId.suffix(4))",
+                        displayName: nil,
+                        avatarUrl: nil,
+                        bannerUrl: nil,
+                        bio: nil,
+                        status: .offline,
+                        customStatus: nil,
+                        bot: false,
+                        createdAt: Date()
+                    )
+                }
+                let newParticipant = VoiceParticipant(
+                    id: voiceState.userId,
+                    user: user,
+                    voiceState: voiceState
+                )
+                voiceParticipants.append(newParticipant)
+                onParticipantJoined?(newParticipant)
+            }
+            onParticipantsUpdated?()
+        }
     }
     
     private func handleSpeakingUpdate(userId: String, speaking: Bool) {
-        // Update speaking indicators
+        Task { @MainActor in
+            if let index = voiceParticipants.firstIndex(where: { $0.id == userId }) {
+                let participant = voiceParticipants[index]
+                voiceParticipants[index] = VoiceParticipant(
+                    id: participant.id,
+                    user: participant.user,
+                    voiceState: participant.voiceState,
+                    isSpeaking: speaking
+                )
+                onParticipantsUpdated?()
+            }
+        }
+    }
+    
+    /// Fetch current voice channel participants from API
+    func fetchVoiceChannelParticipants(channelId: String) async throws -> [VoiceParticipant] {
+        // Try to get participants via the channel info endpoint
+        let data = try await apiService?.makeRequest(endpoint: "/channels/\(channelId)")
+        guard let data = data else { return [] }
+        
+        // Parse the response to get voice_states if available
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let voiceStates = json["voice_states"] as? [[String: Any]] {
+            
+            var participants: [VoiceParticipant] = []
+            for state in voiceStates {
+                guard let userId = state["user_id"] as? String else { continue }
+                
+                // Try to get user info from the voice state
+                let user: User
+                if let userObj = state["user"] as? [String: Any],
+                   let userData = try? JSONSerialization.data(withJSONObject: userObj),
+                   let parsedUser = try? JSONDecoder.flukavike.decode(User.self, from: userData) {
+                    user = parsedUser
+                } else {
+                    // Create placeholder
+                    user = User(
+                        id: userId,
+                        username: "user_\(userId.prefix(4))",
+                        displayName: nil,
+                        avatarUrl: nil,
+                        bannerUrl: nil,
+                        bio: nil,
+                        status: .offline,
+                        customStatus: nil,
+                        bot: false,
+                        createdAt: Date()
+                    )
+                }
+                
+                // Create voice state from the data we have
+                let participantVoiceState = VoiceState(
+                    userId: userId,
+                    channelId: channelId,
+                    guildId: nil,
+                    mute: state["mute"] as? Bool ?? false,
+                    deaf: state["deaf"] as? Bool ?? false,
+                    selfMute: state["self_mute"] as? Bool ?? false,
+                    selfDeaf: state["self_deaf"] as? Bool ?? false,
+                    suppress: state["suppress"] as? Bool ?? false,
+                    requestToSpeakTimestamp: state["request_to_speak_timestamp"] as? String,
+                    member: nil
+                )
+                let participant = VoiceParticipant(
+                    id: userId,
+                    user: user,
+                    voiceState: participantVoiceState
+                )
+                participants.append(participant)
+            }
+            
+            await MainActor.run {
+                self.voiceParticipants = participants
+                self.onParticipantsUpdated?()
+            }
+            return participants
+        }
+        return []
     }
     
     private func cleanupCall() {
@@ -370,11 +525,11 @@ extension FlukavikeCallService: CXProviderDelegate {
     }
     
     func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
-        voiceConnection?.audioSessionDidActivate(audioSession)
+        // LiveKit handles audio session activation internally once SDK is integrated
     }
-    
+
     func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
-        voiceConnection?.audioSessionDidDeactivate(audioSession)
+        // LiveKit handles audio session deactivation internally once SDK is integrated
     }
 }
 
@@ -410,7 +565,7 @@ struct FlukavikeCall: Identifiable, Codable, Equatable {
     }
 }
 
-struct VoiceState: Codable {
+struct VoiceState: Decodable {
     let userId: String
     let channelId: String?
     let guildId: String?
@@ -420,6 +575,34 @@ struct VoiceState: Codable {
     let selfDeaf: Bool
     let suppress: Bool
     let requestToSpeakTimestamp: String?
+    /// The member object may be included in gateway VOICE_STATE_UPDATE events
+    let member: GuildMemberResponse?
+    
+    enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case channelId = "channel_id"
+        case guildId = "guild_id"
+        case mute
+        case deaf
+        case selfMute = "self_mute"
+        case selfDeaf = "self_deaf"
+        case suppress
+        case requestToSpeakTimestamp = "request_to_speak_timestamp"
+        case member
+    }
+    
+    init(userId: String, channelId: String?, guildId: String?, mute: Bool, deaf: Bool, selfMute: Bool, selfDeaf: Bool, suppress: Bool, requestToSpeakTimestamp: String?, member: GuildMemberResponse?) {
+        self.userId = userId
+        self.channelId = channelId
+        self.guildId = guildId
+        self.mute = mute
+        self.deaf = deaf
+        self.selfMute = selfMute
+        self.selfDeaf = selfDeaf
+        self.suppress = suppress
+        self.requestToSpeakTimestamp = requestToSpeakTimestamp
+        self.member = member
+    }
 }
 
 struct VoiceParticipant: Identifiable {
@@ -429,41 +612,70 @@ struct VoiceParticipant: Identifiable {
     var isSpeaking: Bool = false
 }
 
+/// Received from the gateway after sending op 4 (VOICE_STATE_UPDATE).
+/// Contains the LiveKit JWT and endpoint needed to connect.
+struct VoiceServerUpdate: Codable {
+    let token: String
+    let endpoint: String
+    let guildId: String?
+    let channelId: String?   // present for DM calls
+    let connectionId: String?
+}
+
+// Fluxer REST response for POST /channels/{id}/voice/token
 struct VoiceTokenResponse: Codable {
     let endpoint: String
     let token: String
-    let sessionId: String
-    let userId: String
+    let connectionId: String?  // "connection_id"
+    let tokenNonce: String?    // "token_nonce"
+    // Legacy fields kept for fallback compatibility
+    let sessionId: String?
+    let userId: String?
 }
 
-// MARK: - Voice Connection (Wraps WebRTC)
+// MARK: - Voice Connection (LiveKit)
+import LiveKit
+
 class VoiceConnection {
     let endpoint: String
     let token: String
-    let sessionId: String
-    let userId: String
-    
-    init(endpoint: String, token: String, sessionId: String, userId: String) {
+    private(set) var room: Room?
+
+    init(endpoint: String, token: String) {
         self.endpoint = endpoint
         self.token = token
-        self.sessionId = sessionId
-        self.userId = userId
     }
-    
+
     func connect() async throws {
-        // Connect to Flukavike voice gateway
-        // Exchange SDP and ICE candidates
-        // This uses WebRTC under the hood but via Flukavike protocol
+        let room = Room()
+        self.room = room
+        let connectOptions = ConnectOptions(autoSubscribe: true)
+        let roomOptions = RoomOptions(
+            defaultAudioCaptureOptions: AudioCaptureOptions(echoCancellation: true, noiseSuppression: true)
+        )
+        try await room.connect(url: endpoint, token: token, connectOptions: connectOptions, roomOptions: roomOptions)
+        try await room.localParticipant.setMicrophone(enabled: true)
     }
-    
+
     func disconnect() {
-        // Disconnect from voice gateway
+        Task { await room?.disconnect() }
+        room = nil
     }
-    
-    func setDeafen(_ deafen: Bool) {
-        // Update deafen state
+
+    func setMute(_ muted: Bool) {
+        Task { try? await room?.localParticipant.setMicrophone(enabled: !muted) }
     }
-    
-    func audioSessionDidActivate(_ session: AVAudioSession) {}
-    func audioSessionDidDeactivate(_ session: AVAudioSession) {}
+
+    func setCamera(_ enabled: Bool) {
+        Task { try? await room?.localParticipant.setCamera(enabled: enabled) }
+    }
+
+    func setDeafen(_ deafened: Bool) {
+        // Set output volume to 0 when deafened via AVAudioSession
+        let volume: Float = deafened ? 0 : 1
+        try? AVAudioSession.sharedInstance().setActive(true)
+        // LiveKit doesn't expose per-track mute for remote audio from the receiver side;
+        // deafen is handled at the audio output level
+        _ = volume // volume control requires AVAudioPlayer or system API
+    }
 }

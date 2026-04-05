@@ -1,6 +1,5 @@
 //
 //  SettingsView.swift
-//  Settings with extensive customization
 //
 
 import SwiftUI
@@ -9,240 +8,130 @@ struct SettingsView: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
-    
-    @State private var searchText: String = ""
-    @State private var showAddAccount = false
-    
+
+    private var appVersion: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+        return "\(version) (\(build))"
+    }
+
     private func signOut() {
         Task {
             await WebAuthService.shared.logout()
             WebSocketService.shared.disconnect()
         }
     }
-    
+
     var body: some View {
         NavigationStack {
             List {
-                // Account Section
-                Section {
-                    SettingsRow(
-                        icon: "person.fill",
-                        iconColor: themeManager.accentColor.color,
-                        title: "Account",
-                        subtitle: "@alice@fluxer.app"
-                    ) {}
-                    
-                    SettingsRow(
-                        icon: "lock.fill",
-                        iconColor: .green,
-                        title: "Privacy & Security",
-                        subtitle: "2FA, Sessions, Privacy"
-                    ) {}
-                }
-                
-                // Appearance Section
-                Section("Appearance") {
-                    NavigationLink {
-                        AppearanceSettingsView()
-                    } label: {
-                        SettingsRow(
-                            icon: "paintbrush.fill",
-                            iconColor: .purple,
-                            title: "Theme & Colors",
-                            subtitle: "\(themeManager.currentTheme.rawValue) · \(themeManager.accentColor.rawValue)",
-                            showArrow: false
-                        ) {}
-                    }
-                    .listRowBackground(themeManager.backgroundPrimary(colorScheme))
-                    
-                    SettingsRow(
-                        icon: "textformat.size",
-                        iconColor: .blue,
-                        title: "Text Size",
-                        subtitle: "Default"
-                    ) {}
-                    
-                    SettingsRow(
-                        icon: "sparkles",
-                        iconColor: .orange,
-                        title: "Custom CSS",
-                        subtitle: "Personalize your experience"
-                    ) {}
-                }
-                
-                // Notifications Section
-                Section("Notifications") {
-                    NavigationLink {
-                        NotificationSettingsView()
-                    } label: {
-                        SettingsRow(
-                            icon: "bell.fill",
-                            iconColor: .red,
-                            title: "Push Notifications",
-                            subtitle: "3 apps configured",
-                            showArrow: false
-                        ) {}
-                    }
-                    .listRowBackground(themeManager.backgroundPrimary(colorScheme))
-                    
-                    ToggleRow(
-                        icon: "speaker.wave.2.fill",
-                        iconColor: .pink,
-                        title: "Sounds",
-                        subtitle: "Play sounds for notifications",
-                        isOn: .constant(true)
-                    )
-                    
-                    ToggleRow(
-                        icon: "hand.tap.fill",
-                        iconColor: .cyan,
-                        title: "Haptic Feedback",
-                        subtitle: "Vibrate on interactions",
-                        isOn: .constant(true)
-                    )
-                    
-                    ToggleRow(
-                        icon: "phone.fill",
-                        iconColor: .green,
-                        title: "Incoming Calls",
-                        subtitle: "Show call notifications",
-                        isOn: .constant(true)
-                    )
-                }
-                
-                // Messaging Section
-                Section("Messaging") {
-                    SettingsRow(
-                        icon: "photo.stack.fill",
-                        iconColor: .indigo,
-                        title: "Media",
-                        subtitle: "Auto-download, quality"
-                    ) {}
-                    
-                    ToggleRow(
-                        icon: "eye.fill",
-                        iconColor: .teal,
-                        title: "Read Receipts",
-                        subtitle: "Let others see when you've read messages",
-                        isOn: .constant(true)
-                    )
-                    
-                    ToggleRow(
-                        icon: "text.quote",
-                        iconColor: .brown,
-                        title: "Markdown Formatting",
-                        subtitle: "Enable rich text formatting",
-                        isOn: .constant(true)
-                    )
-                }
-                
-                // Account Section (WebAuth)
-                Section("Account") {
-                    if let user = WebAuthService.shared.currentUser {
-                        HStack(spacing: 12) {
-                            // Avatar placeholder
+                // MARK: Profile
+                if let user = WebAuthService.shared.currentUser {
+                    Section {
+                        HStack(spacing: 14) {
                             ZStack {
                                 Circle()
                                     .fill(themeManager.accentColor.color.opacity(0.2))
-                                    .frame(width: 44, height: 44)
-                                
+                                    .frame(width: 52, height: 52)
                                 Text(String(user.username.prefix(1).uppercased()))
-                                    .font(.system(size: 18, weight: .bold))
+                                    .font(.system(size: 22, weight: .bold))
                                     .foregroundStyle(themeManager.accentColor.color)
                             }
-                            
-                            VStack(alignment: .leading, spacing: 2) {
+                            VStack(alignment: .leading, spacing: 3) {
                                 Text(user.displayName ?? user.username)
                                     .font(.system(size: 17, weight: .semibold))
                                     .foregroundStyle(themeManager.textPrimary(colorScheme))
-                                
-                                Text("@\(user.username)@web.fluxer.app")
-                                    .font(.system(size: 15))
+                                Text("@\(user.username)")
+                                    .font(.system(size: 14))
                                     .foregroundStyle(themeManager.textSecondary(colorScheme))
                             }
-                            
                             Spacer()
-                            
-                            // Connection status
                             Circle()
                                 .fill(Color.green)
                                 .frame(width: 10, height: 10)
                         }
-                        .padding(.vertical, 4)
+                        .padding(.vertical, 6)
+                        .listRowBackground(themeManager.backgroundPrimary(colorScheme))
                     }
-                    
-                    Button(action: { showAddAccount = true }) {
-                        HStack(spacing: 12) {
-                            Image(systemName: "person.badge.plus")
-                                .font(.system(size: 20))
-                                .foregroundStyle(themeManager.accentColor.color)
-                                .frame(width: 44, height: 44)
-                            
-                            Text("Add Account")
-                                .font(.system(size: 17))
-                                .foregroundStyle(themeManager.accentColor.color)
-                            
-                            Spacer()
+                }
+
+                // MARK: Appearance
+                Section("Appearance") {
+                    NavigationLink(destination: AppearanceSettingsView()) {
+                        SettingsNavRow(
+                            icon: "paintbrush.fill",
+                            iconColor: .purple,
+                            title: "Theme & Colors",
+                            subtitle: "\(themeManager.currentTheme.rawValue) · \(themeManager.accentColor.rawValue)"
+                        )
+                    }
+                    .listRowBackground(themeManager.backgroundPrimary(colorScheme))
+                }
+
+                // MARK: Notifications
+                Section("Notifications") {
+                    Button {
+                        if let url = URL(string: UIApplication.openSettingsURLString) {
+                            UIApplication.shared.open(url)
                         }
+                    } label: {
+                        SettingsNavRow(
+                            icon: "bell.fill",
+                            iconColor: .red,
+                            title: "Notification Settings",
+                            subtitle: "Manage in iOS Settings",
+                            showChevron: false
+                        )
                     }
+                    .listRowBackground(themeManager.backgroundPrimary(colorScheme))
                 }
-                
-                // Advanced Section
-                Section("Advanced") {
-                    ToggleRow(
-                        icon: "bolt.fill",
-                        iconColor: .yellow,
-                        title: "Reduced Motion",
-                        subtitle: "Minimize animations",
-                        isOn: .constant(false)
-                    )
-                    
-                    SettingsRow(
-                        icon: "wand.and.stars",
-                        iconColor: .mint,
-                        title: "Developer Options",
-                        subtitle: "Debug tools, logs"
-                    ) {}
+
+                // MARK: Support
+                Section("Support") {
+                    NavigationLink(destination: ContactSupportView()) {
+                        SettingsNavRow(
+                            icon: "envelope.fill",
+                            iconColor: .blue,
+                            title: "Contact Support",
+                            subtitle: "Report issues or send feedback"
+                        )
+                    }
+                    .listRowBackground(themeManager.backgroundPrimary(colorScheme))
                 }
-                
-                // About Section
+
+                // MARK: Source Code
+                Section("Development") {
+                    Button {
+                        if let url = URL(string: "https://github.com/bruhdev1290/flukavike") {
+                            UIApplication.shared.open(url)
+                        }
+                    } label: {
+                        SettingsNavRow(
+                            icon: "curlybraces",
+                            iconColor: .gray,
+                            title: "Source Code",
+                            subtitle: "View on GitHub"
+                        )
+                    }
+                    .listRowBackground(themeManager.backgroundPrimary(colorScheme))
+                }
+
+                // MARK: About
                 Section("About") {
-                    SettingsRow(
-                        icon: "questionmark.circle.fill",
-                        iconColor: .blue,
-                        title: "Help & Support",
-                        subtitle: nil
-                    ) {}
-                    
-                    SettingsRow(
-                        icon: "doc.text.fill",
-                        iconColor: .gray,
-                        title: "Terms of Service",
-                        subtitle: nil
-                    ) {}
-                    
-                    SettingsRow(
-                        icon: "hand.raised.fill",
-                        iconColor: .gray,
-                        title: "Privacy Policy",
-                        subtitle: nil
-                    ) {}
-                    
                     HStack {
                         Text("Version")
                             .font(.system(size: 17))
                             .foregroundStyle(themeManager.textPrimary(colorScheme))
-                        
                         Spacer()
-                        
-                        Text("1.0.0 (Build 42)")
+                        Text(appVersion)
                             .font(.system(size: 17))
                             .foregroundStyle(themeManager.textSecondary(colorScheme))
                     }
                     .padding(.vertical, 4)
+                    .listRowBackground(themeManager.backgroundPrimary(colorScheme))
                 }
-                
-                // Sign Out Section
+
+                // MARK: Sign Out
                 Section {
                     Button(action: signOut) {
                         HStack {
@@ -253,48 +142,93 @@ struct SettingsView: View {
                             Spacer()
                         }
                     }
+                    .listRowBackground(themeManager.backgroundPrimary(colorScheme))
                 }
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
-            .background(themeManager.backgroundPrimary(colorScheme))
+            .background(themeManager.backgroundSecondary(colorScheme))
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(themeManager.accentColor.color)
+                    Button("Done") { dismiss() }
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(themeManager.accentColor.color)
                 }
             }
-            .searchable(text: $searchText)
-            .sheet(isPresented: $showAddAccount) {
-                WebLoginView()
+        }
+    }
+}
+
+// MARK: - Settings Nav Row (plain view, safe inside NavigationLink)
+private struct SettingsNavRow: View {
+    @Environment(ThemeManager.self) private var themeManager
+    @Environment(\.colorScheme) private var colorScheme
+
+    let icon: String
+    let iconColor: Color
+    let title: String
+    var subtitle: String? = nil
+    var showChevron: Bool = true
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(iconColor.opacity(0.15))
+                    .frame(width: 32, height: 32)
+                Image(systemName: icon)
+                    .font(.system(size: 16))
+                    .foregroundStyle(iconColor)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 17))
+                    .foregroundStyle(themeManager.textPrimary(colorScheme))
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.system(size: 13))
+                        .foregroundStyle(themeManager.textSecondary(colorScheme))
+                }
+            }
+            Spacer()
+            if showChevron {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(themeManager.textTertiary(colorScheme))
             }
         }
+        .padding(.vertical, subtitle != nil ? 6 : 0)
+        .contentShape(Rectangle())
     }
 }
 
 // MARK: - Appearance Settings
 struct AppearanceSettingsView: View {
     @Environment(ThemeManager.self) private var themeManager
-    @Environment(\.colorScheme) private var colorScheme
-    
+    @Environment(\.colorScheme) private var systemColorScheme
+
+    private var cs: ColorScheme {
+        switch themeManager.currentTheme {
+        case .dark, .oled: return .dark
+        case .light: return .light
+        case .system: return systemColorScheme
+        }
+    }
+
     var body: some View {
         List {
-            // Theme Selection
             Section("Theme") {
                 ForEach(ThemeManager.AppTheme.allCases) { theme in
-                    Button(action: { themeManager.currentTheme = theme }) {
+                    Button(action: {
+                        themeManager.currentTheme = theme
+                    }) {
                         HStack {
                             Text(theme.rawValue)
                                 .font(.system(size: 17))
-                                .foregroundStyle(themeManager.textPrimary(colorScheme))
-                            
+                                .foregroundStyle(themeManager.textPrimary(cs))
                             Spacer()
-                            
                             if themeManager.currentTheme == theme {
                                 Image(systemName: "checkmark")
                                     .font(.system(size: 17, weight: .semibold))
@@ -303,10 +237,10 @@ struct AppearanceSettingsView: View {
                         }
                     }
                     .buttonStyle(PlainButtonStyle())
+                    .listRowBackground(themeManager.backgroundPrimary(cs))
                 }
             }
-            
-            // Accent Color Selection
+
             Section("Accent Color") {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 60))], spacing: 16) {
                     ForEach(ThemeManager.AccentColor.allCases) { color in
@@ -316,31 +250,28 @@ struct AppearanceSettingsView: View {
                                     .fill(color.color)
                                     .frame(width: 44, height: 44)
                                     .overlay(
-                                        Circle()
-                                            .stroke(themeManager.textPrimary(colorScheme), lineWidth: themeManager.accentColor == color ? 3 : 0)
+                                        Circle().stroke(themeManager.textPrimary(cs),
+                                                        lineWidth: themeManager.accentColor == color ? 3 : 0)
                                     )
-                                
                                 Text(color.rawValue)
                                     .font(.system(size: 11))
-                                    .foregroundStyle(themeManager.textSecondary(colorScheme))
+                                    .foregroundStyle(themeManager.textSecondary(cs))
                             }
                         }
                         .buttonStyle(PlainButtonStyle())
                     }
                 }
                 .padding(.vertical, 8)
+                .listRowBackground(themeManager.backgroundPrimary(cs))
             }
-            
-            // Preview
+
             Section("Preview") {
                 VStack(spacing: 12) {
                     HStack {
                         Text("Sample Text")
                             .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(themeManager.textPrimary(colorScheme))
-                        
+                            .foregroundStyle(themeManager.textPrimary(cs))
                         Spacer()
-                        
                         Capsule()
                             .fill(themeManager.accentColor.color)
                             .frame(width: 60, height: 30)
@@ -350,158 +281,168 @@ struct AppearanceSettingsView: View {
                                     .foregroundStyle(.white)
                             )
                     }
-                    
                     Text("This is how your interface will look with the selected theme and accent color.")
                         .font(.system(size: 15))
-                        .foregroundStyle(themeManager.textSecondary(colorScheme))
+                        .foregroundStyle(themeManager.textSecondary(cs))
                 }
                 .padding(.vertical, 8)
+                .listRowBackground(themeManager.backgroundPrimary(cs))
             }
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
-        .background(themeManager.backgroundPrimary(colorScheme))
+        .background(themeManager.backgroundSecondary(cs))
         .navigationTitle("Appearance")
         .navigationBarTitleDisplayMode(.inline)
     }
 }
 
-// MARK: - Notification Settings
-struct NotificationSettingsView: View {
+// MARK: - Contact Support
+struct ContactSupportView: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(\.colorScheme) private var colorScheme
-    
-    var body: some View {
-        List {
-            Section {
-                ToggleRow(
-                    icon: "bell.badge.fill",
-                    iconColor: .red,
-                    title: "Enable Push Notifications",
-                    subtitle: nil,
-                    isOn: .constant(true)
-                )
-            }
-            
-            Section("Notification Types") {
-                ToggleRow(
-                    icon: "at",
-                    iconColor: .blue,
-                    title: "Mentions",
-                    subtitle: "When someone mentions you",
-                    isOn: .constant(true)
-                )
-                
-                ToggleRow(
-                    icon: "bubble.left.fill",
-                    iconColor: .green,
-                    title: "Direct Messages",
-                    subtitle: "New private messages",
-                    isOn: .constant(true)
-                )
-                
-                ToggleRow(
-                    icon: "face.smiling.fill",
-                    iconColor: .yellow,
-                    title: "Reactions",
-                    subtitle: "When someone reacts to your posts",
-                    isOn: .constant(true)
-                )
-                
-                ToggleRow(
-                    icon: "person.badge.plus.fill",
-                    iconColor: .purple,
-                    title: "Follows",
-                    subtitle: "New followers",
-                    isOn: .constant(false)
-                )
-            }
-            
-            Section("Quiet Hours") {
-                ToggleRow(
-                    icon: "moon.fill",
-                    iconColor: .indigo,
-                    title: "Enable Quiet Hours",
-                    subtitle: "Pause notifications during set times",
-                    isOn: .constant(false)
-                )
-                
-                DatePicker("From", selection: .constant(Date()), displayedComponents: .hourAndMinute)
-                DatePicker("To", selection: .constant(Date()), displayedComponents: .hourAndMinute)
-            }
-        }
-        .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
-        .background(themeManager.backgroundPrimary(colorScheme))
-        .navigationTitle("Notifications")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
 
-// MARK: - Instance Settings (Simplified for web.fluxer.app)
-struct InstanceSettingsView: View {
-    @Environment(ThemeManager.self) private var themeManager
-    @Environment(\.colorScheme) private var colorScheme
-    
+    enum SupportCategory: String, CaseIterable, Identifiable {
+        case error = "Error Report"
+        case featureRequest = "Feature Request"
+        case securityPrivacy = "Security or Privacy Inquiry"
+        var id: String { rawValue }
+    }
+
+    @State private var category: SupportCategory = .error
+    @State private var description: String = ""
+    @State private var includeLogs: Bool = false
+    @State private var didSend: Bool = false
+
+    private var deviceInfo: String {
+        let device = UIDevice.current
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+        return """
+        App Version: \(version) (\(build))
+        iOS: \(device.systemVersion)
+        Device: \(device.model)
+        """
+    }
+
+    private func sendEmail() {
+        let subject = "[\(category.rawValue)] Flukavike Support"
+        var body = ""
+        if !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            body += description + "\n\n"
+        }
+        if includeLogs {
+            body += "--- Device Info ---\n" + deviceInfo + "\n"
+        }
+
+        let encodedSubject = subject.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        let encodedBody = body.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        let urlString = "mailto:correspondencesandrew@gmail.com?subject=\(encodedSubject)&body=\(encodedBody)"
+
+        if let url = URL(string: urlString) {
+            UIApplication.shared.open(url)
+            didSend = true
+        }
+    }
+
     var body: some View {
         List {
-            Section {
-                HStack(spacing: 12) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(themeManager.accentColor.color.opacity(0.15))
-                            .frame(width: 44, height: 44)
-                        
-                        Image(systemName: "globe")
-                            .font(.system(size: 20))
-                            .foregroundStyle(themeManager.accentColor.color)
+            // Category picker
+            Section("Category") {
+                Picker("Category", selection: $category) {
+                    ForEach(SupportCategory.allCases) { cat in
+                        Text(cat.rawValue).tag(cat)
                     }
-                    
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Fluxer Web")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(themeManager.textPrimary(colorScheme))
-                        
-                        Text("web.fluxer.app")
-                            .font(.system(size: 15))
-                            .foregroundStyle(themeManager.textSecondary(colorScheme))
-                        
-                        Text("Connected")
-                            .font(.system(size: 13))
-                            .foregroundStyle(.green)
-                    }
-                    
-                    Spacer()
                 }
-                .padding(.vertical, 4)
+                .pickerStyle(.segmented)
+                .listRowBackground(themeManager.backgroundPrimary(colorScheme))
             }
-            
+
+            // Description
             Section {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("Centralized Instance", systemImage: "server.rack")
-                        .font(.system(size: 15, weight: .semibold))
+                ZStack(alignment: .topLeading) {
+                    if description.isEmpty {
+                        Text("Describe your issue or request...")
+                            .font(.system(size: 16))
+                            .foregroundStyle(themeManager.textTertiary(colorScheme))
+                            .padding(.top, 8)
+                            .padding(.leading, 4)
+                    }
+                    TextEditor(text: $description)
+                        .font(.system(size: 16))
                         .foregroundStyle(themeManager.textPrimary(colorScheme))
-                    
-                    Text("Flukavike connects to web.fluxer.app as the central Fluxer instance. All your servers and conversations are managed through this instance.")
-                        .font(.system(size: 14))
-                        .foregroundStyle(themeManager.textSecondary(colorScheme))
-                        .lineLimit(4)
+                        .frame(minHeight: 120)
+                        .scrollContentBackground(.hidden)
                 }
-                .padding(.vertical, 4)
+                .listRowBackground(themeManager.backgroundPrimary(colorScheme))
+            } header: {
+                Text("Description")
+            } footer: {
+                Text("Optional — the more detail you provide, the faster we can help.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(themeManager.textTertiary(colorScheme))
+            }
+
+            // Include logs toggle
+            Section {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Include Device Info")
+                            .font(.system(size: 16))
+                            .foregroundStyle(themeManager.textPrimary(colorScheme))
+                        Text("App version, iOS version, device model")
+                            .font(.system(size: 13))
+                            .foregroundStyle(themeManager.textTertiary(colorScheme))
+                    }
+                    Spacer()
+                    Toggle("", isOn: $includeLogs)
+                        .labelsHidden()
+                        .tint(themeManager.accentColor.color)
+                }
+                .listRowBackground(themeManager.backgroundPrimary(colorScheme))
+
+                if includeLogs {
+                    Text(deviceInfo)
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundStyle(themeManager.textSecondary(colorScheme))
+                        .listRowBackground(themeManager.backgroundPrimary(colorScheme))
+                }
+            } header: {
+                Text("Logs")
+            }
+
+            // Send button
+            Section {
+                Button(action: sendEmail) {
+                    HStack {
+                        Spacer()
+                        Label("Open Email App", systemImage: "envelope.fill")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(.white)
+                        Spacer()
+                    }
+                    .padding(.vertical, 4)
+                }
+                .listRowBackground(themeManager.accentColor.color)
+            } footer: {
+                if didSend {
+                    Text("Your email app should have opened. Send the draft to submit your request.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.green)
+                }
             }
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
-        .background(themeManager.backgroundPrimary(colorScheme))
-        .navigationTitle("Instance")
+        .background(themeManager.backgroundSecondary(colorScheme))
+        .navigationTitle("Contact Support")
         .navigationBarTitleDisplayMode(.inline)
     }
 }
-
-
 
 // MARK: - Preview
 #Preview {
     SettingsView()
         .environment(ThemeManager())
+        .environment(AppState())
 }

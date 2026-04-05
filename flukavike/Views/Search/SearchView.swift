@@ -68,18 +68,16 @@ struct SearchView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Search Bar
-                searchBarSection
-                
                 // Category Filters
                 categoryFilterSection
-                
+
                 // Results
                 resultsList
             }
             .background(themeManager.backgroundPrimary(colorScheme))
             .navigationTitle("Search")
             .navigationBarTitleDisplayMode(.large)
+            .searchable(text: $searchQuery, prompt: "Search servers, channels, messages, users...")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") {
@@ -92,35 +90,6 @@ struct SearchView: View {
         .onChange(of: searchQuery) { _, newValue in
             performSearch(query: newValue)
         }
-    }
-    
-    // MARK: - Search Bar Section
-    private var searchBarSection: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 17))
-                .foregroundStyle(themeManager.textTertiary(colorScheme))
-            
-            TextField("Search servers, channels, messages, users...", text: $searchQuery)
-                .font(.system(size: 17))
-                .foregroundStyle(themeManager.textPrimary(colorScheme))
-            
-            if !searchQuery.isEmpty {
-                Button(action: { searchQuery = "" }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(themeManager.textTertiary(colorScheme))
-                }
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(themeManager.backgroundTertiary(colorScheme))
-        )
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
     }
     
     // MARK: - Category Filter Section
@@ -420,19 +389,32 @@ struct SearchView: View {
     }
     
     private func handleResultTap(_ result: SearchResult) {
-        // Handle navigation based on result type
         switch result.metadata {
         case .server(let server):
-            print("Navigate to server: \(server.name)")
+            // Navigate to the server's first channel via pending navigation
+            if let firstChannel = server.channels.first {
+                NotificationCenter.default.post(
+                    name: .init("ViewChannelIntent"),
+                    object: nil,
+                    userInfo: ["serverId": server.id, "channelId": firstChannel.id]
+                )
+            }
             dismiss()
         case .channel(let channel, _):
-            print("Navigate to channel: \(channel.name)")
+            NotificationCenter.default.post(
+                name: .init("ViewChannelIntent"),
+                object: nil,
+                userInfo: ["serverId": channel.serverId, "channelId": channel.id]
+            )
             dismiss()
         case .message(let message, _, _):
-            print("Navigate to message: \(message.id)")
+            NotificationCenter.default.post(
+                name: .init("ViewChannelIntent"),
+                object: nil,
+                userInfo: ["serverId": "", "channelId": message.channelId]
+            )
             dismiss()
-        case .user(let user):
-            print("Navigate to user: \(user.formattedName)")
+        case .user:
             dismiss()
         }
     }

@@ -118,8 +118,14 @@ struct ChannelListView: View {
                 }
             }
             .sheet(item: $selectedChannel) { channel in
-                NavigationStack {
-                    ChatView(channel: channel)
+                if channel.type == .voice {
+                    VoiceChannelView(channel: channel)
+                        .environment(themeManager)
+                        .environment(appState)
+                } else {
+                    NavigationStack {
+                        ChatView(channel: channel)
+                    }
                 }
             }
         }
@@ -272,16 +278,6 @@ struct ChannelRow: View {
                         .frame(width: 8, height: 8)
                 }
                 
-                // Participant count for voice channels
-                if channel.type == .voice {
-                    HStack(spacing: 4) {
-                        Image(systemName: "person.fill")
-                            .font(.system(size: 10))
-                        Text("12")
-                            .font(.system(size: 13, weight: .medium))
-                    }
-                    .foregroundStyle(themeManager.textTertiary(colorScheme))
-                }
             }
         }
         .padding(.vertical, 6)

@@ -26,6 +26,7 @@ struct FluxerApp: App {
     // View State
     @State private var showIncomingCall = false
     @State private var showActiveCall = false
+    @State private var toastManager = ToastManager.shared
     
     // Lifecycle
     @Environment(\.scenePhase) private var scenePhase
@@ -77,6 +78,18 @@ struct FluxerApp: App {
                 CallView()
                     .transition(.move(edge: .bottom))
                     .zIndex(100)
+            }
+            
+            // Toast notification overlay
+            if toastManager.isShowing, let message = toastManager.message {
+                VStack {
+                    Spacer()
+                    ToastView(message: message)
+                        .padding(.bottom, 100)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+                .zIndex(200)
+                .animation(.easeInOut(duration: 0.3), value: toastManager.isShowing)
             }
         }
     }
@@ -150,6 +163,7 @@ struct FluxerApp: App {
             appState.currentUser = ready.user
             if !ready.guilds.isEmpty {
                 appState.gatewayGuilds = ready.guilds
+                ChannelStore.shared.update(guilds: ready.guilds, restServers: appState.restServers)
             }
         }
         

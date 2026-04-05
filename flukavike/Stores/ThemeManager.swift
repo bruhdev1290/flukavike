@@ -8,8 +8,25 @@ import Observation
 
 @Observable
 class ThemeManager {
-    var currentTheme: AppTheme = .dark
-    var accentColor: AccentColor = .indigo
+    static let shared = ThemeManager()
+    
+    var currentTheme: AppTheme = .dark {
+        didSet { UserDefaults.standard.set(currentTheme.rawValue, forKey: "theme") }
+    }
+    var accentColor: AccentColor = .indigo {
+        didSet { UserDefaults.standard.set(accentColor.rawValue, forKey: "accentColor") }
+    }
+
+    init() {
+        if let saved = UserDefaults.standard.string(forKey: "theme"),
+           let theme = AppTheme(rawValue: saved) {
+            currentTheme = theme
+        }
+        if let saved = UserDefaults.standard.string(forKey: "accentColor"),
+           let accent = AccentColor(rawValue: saved) {
+            accentColor = accent
+        }
+    }
     
     enum AppTheme: String, CaseIterable, Identifiable {
         case system = "System"
@@ -146,6 +163,17 @@ class AppState {
     // This property is populated by FluxerApp.onReady and consumed by HomeView.loadChannels.
     // See README "Critical: Channel Loading Architecture" for full details.
     var gatewayGuilds: [Server] = []
+
+    /// Servers loaded via REST API — have correct names. Populated by HomeView.loadServers().
+    var restServers: [Server] = []
+
+    /// Best-effort server name for a given server ID: uses REST name if available, else gateway.
+    func serverName(for serverId: String) -> String {
+        if let s = restServers.first(where: { $0.id == serverId }), s.name != "Unknown Server" {
+            return s.name
+        }
+        return gatewayGuilds.first(where: { $0.id == serverId })?.name ?? ""
+    }
     
     var isAuthenticated: Bool {
         WebAuthService.shared.isAuthenticated
