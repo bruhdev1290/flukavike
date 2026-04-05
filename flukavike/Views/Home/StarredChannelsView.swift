@@ -86,40 +86,7 @@ struct StarredChannelsView: View {
             if starred.isEmpty {
                 emptyState
             } else {
-                List {
-                    ForEach(starred, id: \.channel.id) { item in
-                        Button(action: { selectedChannel = item.channel }) {
-                            HStack(spacing: 12) {
-                                Image(systemName: item.channel.type == .announcement ? "megaphone.fill" : "number")
-                                    .font(.system(size: 16))
-                                    .foregroundStyle(themeManager.accentColor.color)
-                                    .frame(width: 28)
-
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("#\(item.channel.name)")
-                                        .font(.system(size: 16, weight: .medium))
-                                        .foregroundStyle(themeManager.textPrimary(colorScheme))
-                                    Text(item.serverName)
-                                        .font(.system(size: 13))
-                                        .foregroundStyle(themeManager.textTertiary(colorScheme))
-                                }
-
-                                Spacer()
-
-                                Image(systemName: "star.fill")
-                                    .font(.system(size: 13))
-                                    .foregroundStyle(.yellow)
-                            }
-                            .padding(.vertical, 4)
-                        }
-                        .listRowBackground(themeManager.backgroundPrimary(colorScheme))
-                        .listRowSeparator(.hidden)
-                        .buttonStyle(PlainButtonStyle())
-                    }
-                }
-                .listStyle(.plain)
-                .background(themeManager.backgroundPrimary(colorScheme))
-                .scrollContentBackground(.hidden)
+                channelList
             }
         }
         .navigationTitle("Starred")
@@ -130,6 +97,44 @@ struct StarredChannelsView: View {
                 ChatView(channel: channel)
             }
         }
+    }
+    
+    private var channelList: some View {
+        List {
+            ForEach(starred, id: \.channel.id) { item in
+                Button(action: { selectedChannel = item.channel }) {
+                    HStack(spacing: 12) {
+                        Image(systemName: item.channel.type == .announcement ? "megaphone.fill" : "number")
+                            .font(.system(size: 16))
+                            .foregroundStyle(themeManager.accentColor.color)
+                            .frame(width: 28)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("#\(item.channel.name)")
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundStyle(themeManager.textPrimary(colorScheme))
+                            Text(item.serverName)
+                                .font(.system(size: 13))
+                                .foregroundStyle(themeManager.textTertiary(colorScheme))
+                        }
+
+                        Spacer()
+
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.yellow)
+                    }
+                    .padding(.vertical, 4)
+                }
+                .listRowBackground(themeManager.backgroundPrimary(colorScheme))
+                .listRowSeparator(.hidden)
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+        .listStyle(.plain)
+        .background(themeManager.backgroundPrimary(colorScheme))
+        .scrollContentBackground(.hidden)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var emptyState: some View {
@@ -148,5 +153,6 @@ struct StarredChannelsView: View {
                 .padding(.horizontal, 40)
             Spacer()
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

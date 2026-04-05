@@ -39,7 +39,10 @@ struct MainTabView: View {
                 .tabItem { Image(systemName: Tab.chat.icon); Text(Tab.chat.rawValue) }
                 .badge(appState.unreadMessages > 0 ? appState.unreadMessages : 0)
 
-            NavigationStack { StarredChannelsView() }
+            NavigationStack { 
+                StarredChannelsView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
                 .tag(Tab.starred)
                 .tabItem { Image(systemName: Tab.starred.icon); Text(Tab.starred.rawValue) }
 
