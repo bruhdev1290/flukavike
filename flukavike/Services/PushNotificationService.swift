@@ -46,68 +46,90 @@ class PushNotificationService: NSObject {
         self.deviceToken = tokenString
         self.isRegistered = true
         
-        // Send to Flukavike server
-        Task {
-            await registerTokenWithServer(tokenString)
-        }
-    }
-    
-    private func registerTokenWithServer(_ token: String) async {
-        // API call to register device token
-        // POST /users/@me/devices
-        // Body: { "token": token, "platform": "ios", "voip": true }
+        // Token is registered with the server via AppDelegate.didRegisterForRemoteNotificationsWithDeviceToken
     }
     
     // MARK: - Notification Handling
-    
-    func handleIncomingNotification(_ notification: [AnyHashable: Any]) {
-        guard let type = notification["type"] as? String else { return }
-        
+
+    func handleIncomingNotification(_ userInfo: [AnyHashable: Any]) {
+        guard let type = userInfo["type"] as? String else { return }
+
         switch type {
         case "INCOMING_CALL":
-            if let callData = notification["call"] as? [String: Any] {
-                handleIncomingCall(callData)
+            if let callData = userInfo["call"] as? [String: Any] {
+                guard let call = CallNotification(from: callData) else { return }
+                onIncomingCall?(call)
             }
-            
+
         case "CALL_ENDED":
-            if let callId = notification["call_id"] as? String {
+            if let callId = userInfo["call_id"] as? String {
                 onCallEnded?(callId)
             }
-            
+
         case "MESSAGE_MENTION":
-            // Handle mention notification
-            break
-            
+            let channelId = userInfo["channel_id"] as? String
+            let serverId  = userInfo["server_id"]  as? String
+            let title     = (userInfo["title"]   as? String) ?? "New Mention"
+            let body      = (userInfo["body"]    as? String) ?? ""
+            scheduleLocalNotification(title: title, body: body,
+                                      channelId: channelId, serverId: serverId,
+                                      type: "MESSAGE_MENTION")
+            incrementBadge()
+
         case "DIRECT_MESSAGE":
-            // Handle DM notification
-            break
-            
+            let channelId = userInfo["channel_id"] as? String
+            let title     = (userInfo["title"] as? String) ?? "New Message"
+            let body      = (userInfo["body"]  as? String) ?? ""
+            scheduleLocalNotification(title: title, body: body,
+                                      channelId: channelId, serverId: nil,
+                                      type: "DIRECT_MESSAGE")
+            incrementBadge()
+
         default:
             break
         }
     }
-    
-    private func handleIncomingCall(_ callData: [String: Any]) {
-        guard let call = CallNotification(from: callData) else { return }
-        onIncomingCall?(call)
-    }
-    
+
     // MARK: - Local Notifications
-    
-    func scheduleLocalNotification(title: String, body: String, userInfo: [AnyHashable: Any] = [:]) {
+
+    func scheduleLocalNotification(
+        title: String,
+        body: String,
+        channelId: String? = nil,
+        serverId: String? = nil,
+        type: String = "MESSAGE"
+    ) {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         content.sound = .default
-        content.userInfo = userInfo
-        
-        let request = UNNotificationRequest(
-            identifier: UUID().uuidString,
-            content: content,
-            trigger: nil
+        var info: [String: String] = ["type": type]
+        if let c = channelId { info["channel_id"] = c }
+        if let s = serverId  { info["server_id"]  = s }
+        content.userInfo = info
+
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         )
-        
-        UNUserNotificationCenter.current().add(request)
+    }
+
+    // MARK: - Badge
+
+    func incrementBadge() {
+        DispatchQueue.main.async {
+            UNUserNotificationCenter.current().getDeliveredNotifications { delivered in
+                DispatchQueue.main.async {
+                    UIApplication.shared.applicationIconBadgeNumber = delivered.count + 1
+                }
+            }
+        }
+    }
+
+    func clearBadge() {
+        DispatchQueue.main.async {
+            UIApplication.shared.applicationIconBadgeNumber = 0
+            UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+        }
     }
 }
 

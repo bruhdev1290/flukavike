@@ -75,9 +75,27 @@ struct HomeView: View {
                 }
             }
             .onChange(of: appState.gatewayGuilds) { _, gatewayGuilds in
-                // Gateway READY arrived — reload channels for the selected server
                 guard !gatewayGuilds.isEmpty, let server = selectedServer else { return }
                 Task { await loadChannels(for: server) }
+            }
+            .onChange(of: appState.pendingChannelNavigation) { _, pending in
+                guard let pending else { return }
+                // Switch to the right server then open the channel
+                if let server = servers.first(where: { $0.id == pending.serverId  }) {
+                    selectedServer = server
+                    Task { await loadChannels(for: server) }
+                }
+                let channelId = pending.channelId
+                // Wait briefly for channels to load before opening the sheet
+                Task {
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    if let channel = channels.first(where: { $0.id == channelId }) {
+                        await MainActor.run {
+                            activeSheet = .channel(channel)
+                            appState.pendingChannelNavigation = nil
+                        }
+                    }
+                }
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {

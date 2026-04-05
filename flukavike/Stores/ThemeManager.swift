@@ -130,8 +130,16 @@ class AppState {
     var selectedServer: Server?
     var selectedChannel: Channel?
     var isShowingSettings: Bool = false
+    var notifications: [AppNotification] = []
     var unreadNotifications: Int = 0
     var unreadMessages: Int = 0
+    /// Set by the push/deep-link handler to trigger navigation to a specific channel.
+    var pendingChannelNavigation: ChannelNavigation? = nil
+
+    struct ChannelNavigation: Equatable {
+        let serverId: String
+        let channelId: String
+    }
     var connectionStatus: ConnectionStatus = .disconnected
     // ⚠️ WARNING — DO NOT REMOVE OR RENAME THIS PROPERTY.
     // Fluxer delivers channel data via the WebSocket Gateway READY event, not the REST API.

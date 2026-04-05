@@ -10,10 +10,10 @@ struct NotificationsView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(AppState.self) private var appState
     
-    @State private var notifications: [AppNotification] = AppNotification.previewNotifications
     @State private var selectedFilter: NotificationFilter = .all
     @State private var selectedServerId: String? = nil
-    @State private var showFilterSheet: Bool = false
+
+    private var notifications: [AppNotification] { appState.notifications }
     
     enum NotificationFilter: String, CaseIterable, Identifiable {
         case all = "All"
@@ -183,23 +183,19 @@ struct NotificationsView: View {
                 }
             }
         }
-        .onAppear {
-            appState.unreadNotifications = unreadCount
-        }
     }
     
     private func deleteNotification(_ notification: AppNotification) {
         withAnimation {
-            notifications.removeAll { $0.id == notification.id }
+            appState.notifications.removeAll { $0.id == notification.id }
+            appState.unreadNotifications = appState.notifications.filter { !$0.read }.count
         }
     }
-    
+
     private func markAsRead(_ notification: AppNotification) {
-        if let index = notifications.firstIndex(where: { $0.id == notification.id }) {
-            var updated = notification
-            // Toggle read status
+        if let index = appState.notifications.firstIndex(where: { $0.id == notification.id }) {
             withAnimation {
-                notifications[index] = AppNotification(
+                appState.notifications[index] = AppNotification(
                     id: notification.id,
                     type: notification.type,
                     title: notification.title,
@@ -212,31 +208,23 @@ struct NotificationsView: View {
                 )
             }
         }
-        appState.unreadNotifications = unreadCount
+        appState.unreadNotifications = appState.notifications.filter { !$0.read }.count
     }
-    
+
     private func markAllAsRead() {
         withAnimation {
-            notifications = notifications.map { notification in
-                AppNotification(
-                    id: notification.id,
-                    type: notification.type,
-                    title: notification.title,
-                    message: notification.message,
-                    timestamp: notification.timestamp,
-                    read: true,
-                    relatedId: notification.relatedId,
-                    serverId: notification.serverId,
-                    serverName: notification.serverName
-                )
+            appState.notifications = appState.notifications.map { n in
+                AppNotification(id: n.id, type: n.type, title: n.title, message: n.message,
+                                timestamp: n.timestamp, read: true, relatedId: n.relatedId,
+                                serverId: n.serverId, serverName: n.serverName)
             }
         }
         appState.unreadNotifications = 0
     }
-    
+
     private func clearAll() {
         withAnimation {
-            notifications.removeAll()
+            appState.notifications.removeAll()
         }
         appState.unreadNotifications = 0
     }

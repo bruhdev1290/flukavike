@@ -73,6 +73,10 @@ struct ChannelListView: View {
                     await loadServersAndChannels()
                 }
             }
+            .onChange(of: appState.gatewayGuilds) { _, _ in
+                guard let server = appState.selectedServer else { return }
+                Task { await loadChannels(for: server) }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
@@ -197,12 +201,22 @@ struct ChannelListView: View {
             errorMessage = nil
         }
 
-        // Channels are embedded in the guild object from getUserGuilds.
-        // Only fall back to the separate endpoint if the guild had none.
-        let embedded = server.channels
-        if !embedded.isEmpty {
+        // ⚠️ WARNING — Same gateway-first pattern as HomeView.loadChannels.
+        // Fluxer's REST channels endpoint returns []. See README for details.
+        if let gatewayGuild = appState.gatewayGuilds.first(where: { $0.id == server.id }),
+           !gatewayGuild.channels.isEmpty {
             await MainActor.run {
-                channels = embedded.sorted { $0.position < $1.position }
+                channels = gatewayGuild.channels.sorted { $0.position < $1.position }
+                appState.selectedServer = server
+                isLoading = false
+            }
+            return
+        }
+
+        // Fallback: embedded channels (preview servers) or REST (non-Fluxer instances)
+        if !server.channels.isEmpty {
+            await MainActor.run {
+                channels = server.channels.sorted { $0.position < $1.position }
                 appState.selectedServer = server
                 isLoading = false
             }

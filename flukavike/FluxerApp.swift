@@ -51,6 +51,12 @@ struct FluxerApp: App {
             .onChange(of: scenePhase) { oldPhase, newPhase in
                 handleScenePhaseChange(from: oldPhase, to: newPhase)
             }
+            .onReceive(NotificationCenter.default.publisher(for: .init("ViewChannelIntent"))) { note in
+                guard let info = note.userInfo,
+                      let channelId = info["channelId"] as? String,
+                      let serverId  = info["serverId"]  as? String else { return }
+                appState.pendingChannelNavigation = AppState.ChannelNavigation(serverId: serverId, channelId: channelId)
+            }
         }
     }
     
@@ -148,21 +154,51 @@ struct FluxerApp: App {
         }
         
         webSocketService.onMessageCreate = { message in
-            // Handle new message - update UI, show notification if needed
-            if message.channelId != appState.selectedChannel?.id {
-                // Show local notification
-                pushService.scheduleLocalNotification(
-                    title: message.author.formattedName,
-                    body: message.content
-                )
-            }
+            guard message.channelId != appState.selectedChannel?.id else { return }
+
+            let currentUsername = appState.currentUser?.username ?? ""
+            let currentDisplayName = appState.currentUser?.displayName ?? ""
+            let isMention = !currentUsername.isEmpty && (
+                message.content.contains("@\(currentUsername)") ||
+                message.content.contains("@\(currentDisplayName)")
+            )
+
+            // Only fire a banner for mentions — not every message
+            guard isMention else { return }
+
+            let guild = appState.gatewayGuilds.first { $0.channels.contains { $0.id == message.channelId } }
+
+            pushService.scheduleLocalNotification(
+                title: "\(message.author.formattedName) mentioned you",
+                body: message.content,
+                channelId: message.channelId,
+                serverId: guild?.id,
+                type: "MESSAGE_MENTION"
+            )
+            pushService.incrementBadge()
+
+            let notification = AppNotification(
+                id: message.id,
+                type: .mention,
+                title: "\(message.author.formattedName) mentioned you",
+                message: message.content,
+                timestamp: message.timestamp,
+                read: false,
+                relatedId: message.id,
+                serverId: guild?.id,
+                serverName: guild?.name
+            )
+            appState.notifications.insert(notification, at: 0)
+            appState.unreadNotifications = appState.notifications.filter { !$0.read }.count
         }
-        
+
         webSocketService.onNotification = { notification in
-            // Handle push notification
             if notification.type == .incomingCall {
-                // Call notification handled via CallService
+                // Call notification is handled via CallService
+                return
             }
+            appState.notifications.insert(notification, at: 0)
+            appState.unreadNotifications = appState.notifications.filter { !$0.read }.count
         }
     }
     
@@ -234,11 +270,13 @@ struct FluxerApp: App {
     private func handleScenePhaseChange(from oldPhase: ScenePhase, to newPhase: ScenePhase) {
         switch newPhase {
         case .active:
-            // App came to foreground - reconnect WebSocket if authenticated
+            // Reconnect WebSocket if authenticated
             if appState.isAuthenticated, !webSocketService.isConnected,
                let session = WebAuthService.shared.currentSession {
                 webSocketService.connect(token: session.token)
             }
+            // Clear badge and delivered notifications when user opens the app
+            pushService.clearBadge()
             
         case .background:
             // App went to background - keep WebSocket connected for push notifications
@@ -484,6 +522,16 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let userInfo = response.notification.request.content.userInfo
+
+        // Navigate to the channel the notification came from
+        if let channelId = userInfo["channel_id"] as? String {
+            var info: [String: Any] = ["channelId": channelId]
+            if let serverId = userInfo["server_id"] as? String {
+                info["serverId"] = serverId
+            }
+            NotificationCenter.default.post(name: .init("ViewChannelIntent"), object: nil, userInfo: info)
+        }
+
         PushNotificationService.shared.handleIncomingNotification(userInfo)
         completionHandler()
     }
