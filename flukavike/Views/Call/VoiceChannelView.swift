@@ -247,19 +247,23 @@ struct VoiceChannelView: View {
                 }
             }
             
+            // Store selected channel in service first
+            callService.selectedVoiceChannel = channel
+            
             // Fetch existing participants first
             _ = try? await callService.fetchVoiceChannelParticipants(channelId: channel.id)
             
-            // Join the voice channel
+            // Join the voice channel with timeout
             try await callService.joinVoiceChannel(channel.id)
-            
-            // Store selected channel in service
-            callService.selectedVoiceChannel = channel
             
             isConnecting = false
         } catch {
+            print("[VoiceChannel] Failed to join: \(error)")
             isConnecting = false
             connectionError = "Failed to connect"
+            
+            // Clear selected channel on failure
+            callService.selectedVoiceChannel = nil
         }
     }
 

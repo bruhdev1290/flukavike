@@ -15,6 +15,7 @@ class FlukavikeCallService: NSObject {
     private var provider: CXProvider?
     private var apiService: APIService?
     private(set) var webSocketService: WebSocketService?
+    private var appState: AppState?
     
     // Current call state
     var activeCall: FlukavikeCall?
@@ -187,19 +188,47 @@ class FlukavikeCallService: NSObject {
         // Step 1: Send gateway op 4 to join the voice channel
         // The gateway will respond with VOICE_SERVER_UPDATE containing LiveKit token + endpoint
         guard let ws = webSocketService else { throw VoiceError.notConnected }
-        ws.sendVoiceStateUpdate(channelId: channelId, guildId: webSocketService?.currentGuildId)
+        
+        // Get the guildId for this channel if available
+        let guildId = findGuildIdForChannel(channelId)
+        print("[Voice] Joining channel \(channelId) in guild \(guildId ?? "none")")
+        
+        ws.sendVoiceStateUpdate(channelId: channelId, guildId: guildId)
 
-        // Step 2: Wait for VOICE_SERVER_UPDATE (up to 5 seconds)
-        let voiceServer = try await withTimeout(seconds: 5) {
-            try await ws.waitForVoiceServerUpdate(channelId: channelId)
+        // Step 2: Wait for VOICE_SERVER_UPDATE (up to 10 seconds)
+        // Try both channelId and guildId as keys since different servers send different IDs
+        let voiceServer: VoiceServerUpdate = try await withTimeout(seconds: 10) {
+            // First try waiting for the channel-specific update
+            do {
+                return try await ws.waitForVoiceServerUpdate(channelId: channelId)
+            } catch {
+                // If that fails, try guild-based lookup if we have a guildId
+                if let guildId = guildId {
+                    print("[Voice] Trying guild-based lookup for \(guildId)")
+                    return try await ws.waitForVoiceServerUpdate(channelId: guildId)
+                }
+                throw error
+            }
         }
+        
+        print("[Voice] Got voice server update, endpoint: \(voiceServer.endpoint)")
 
         // Step 3: Connect to LiveKit using the token and endpoint from the gateway
         let conn = VoiceConnection(endpoint: voiceServer.endpoint, token: voiceServer.token)
         voiceConnection = conn
         try await conn.connect()
+        
+        print("[Voice] Connected to LiveKit")
 
         await MainActor.run { self.isMuted = false }
+    }
+    
+    private func findGuildIdForChannel(_ channelId: String) -> String? {
+        // First check the selected voice channel's server
+        if let selectedServerId = selectedVoiceChannel?.serverId, !selectedServerId.isEmpty {
+            return selectedServerId
+        }
+        return webSocketService?.currentGuildId
     }
 
     enum VoiceError: Error {

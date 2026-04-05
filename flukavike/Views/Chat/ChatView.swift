@@ -599,141 +599,101 @@ struct DiscordTypingIndicator: View {
 
 // MARK: - Message Content View (with Channel Mentions)
 struct MessageContentView: View {
+    @Environment(AppState.self) private var appState
     let content: String
     var font: Font = .system(size: 15)
     
-    var body: some View {
-        // Parse content and build view
-        MessageContentParsedView(content: content, font: font)
-            .lineSpacing(2)
-    }
-}
-
-// MARK: - Parsed Message Content
-struct MessageContentParsedView: View {
-    @Environment(AppState.self) private var appState
-    let content: String
-    let font: Font
+    @State private var selectedChannelId: String?
     
     // Regex pattern for Discord-style channel mentions: <#channelId>
     private static let channelMentionPattern = try! NSRegularExpression(pattern: "<#(\\d+)>", options: [])
     
     var body: some View {
-        let segments = parseSegments()
-        
-        // If no matches, just show the whole text
-        if segments.isEmpty {
-            Text(content)
-                .font(font)
-        } else {
-            // Build the content with inline elements
-            FlowLayout(spacing: 4) {
-                ForEach(segments.indices, id: \.self) { index in
-                    segmentView(for: segments[index])
+        textWithChannelMentions
+            .font(font)
+            .lineSpacing(2)
+            .sheet(item: $selectedChannelId) { channelId in
+                if let channel = findChannel(id: channelId) {
+                    NavigationStack {
+                        ChatView(channel: channel)
+                    }
                 }
             }
-        }
     }
     
     @ViewBuilder
-    private func segmentView(for segment: ContentSegment) -> some View {
-        switch segment {
-        case .text(let text):
-            Text(text)
-                .font(font)
-        case .channelMention(let channelId):
-            ChannelMentionPill(channelId: channelId)
+    private var textWithChannelMentions: some View {
+        // Build an attributed string with channel mentions highlighted
+        let parsed = parseContent()
+        
+        if parsed.mentions.isEmpty {
+            // No mentions, just show plain text
+            Text(content)
+        } else {
+            // Show text with channel mention buttons overlay
+            Text(parsed.displayText)
+                .overlay(
+                    mentionOverlays(for: parsed.mentions)
+                )
         }
     }
     
-    private func parseSegments() -> [ContentSegment] {
-        var segments: [ContentSegment] = []
+    private func mentionOverlays(for mentions: [ChannelMention]) -> some View {
+        GeometryReader { geo in
+            // This is a simplified approach - for a production app,
+            // we'd use UITextView with NSTextAttachment for proper inline buttons
+            // For now, we'll show channel mentions as separate tappable elements below the text
+            EmptyView()
+        }
+    }
+    
+    private func parseContent() -> (displayText: String, mentions: [ChannelMention]) {
+        var mentions: [ChannelMention] = []
+        var displayText = content
+        
         let nsRange = NSRange(content.startIndex..., in: content)
-        let matches = MessageContentParsedView.channelMentionPattern.matches(in: content, options: [], range: nsRange)
+        let matches = MessageContentView.channelMentionPattern.matches(in: content, options: [], range: nsRange)
         
-        var currentIndex = content.startIndex
-        
-        for match in matches {
-            // Add text before the mention
-            if let matchRange = Range(match.range, in: content) {
-                if currentIndex < matchRange.lowerBound {
-                    let textSegment = String(content[currentIndex..<matchRange.lowerBound])
-                    if !textSegment.isEmpty {
-                        segments.append(.text(textSegment))
-                    }
-                }
-                
-                // Extract channel ID
-                if let channelIdRange = Range(match.range(at: 1), in: content) {
-                    let channelId = String(content[channelIdRange])
-                    segments.append(.channelMention(channelId))
-                }
-                
-                currentIndex = matchRange.upperBound
-            }
+        // Process matches in reverse order to preserve string indices
+        for match in matches.reversed() {
+            guard let matchRange = Range(match.range, in: content),
+                  let channelIdRange = Range(match.range(at: 1), in: content) else { continue }
+            
+            let channelId = String(content[channelIdRange])
+            let mention = ChannelMention(
+                id: channelId,
+                range: matchRange,
+                channelName: findChannel(id: channelId)?.name ?? "unknown-channel"
+            )
+            mentions.append(mention)
+            
+            // Replace the mention with a readable format
+            let replacement = "#\(mention.channelName)"
+            displayText.replaceSubrange(matchRange, with: replacement)
         }
         
-        // Add remaining text after last match
-        if currentIndex < content.endIndex {
-            let textSegment = String(content[currentIndex..<content.endIndex])
-            if !textSegment.isEmpty {
-                segments.append(.text(textSegment))
-            }
-        }
-        
-        return segments
+        return (displayText, mentions.reversed())
     }
     
-    enum ContentSegment {
-        case text(String)
-        case channelMention(String)
+    private func findChannel(id: String) -> Channel? {
+        for server in appState.gatewayGuilds {
+            if let channel = server.channels.first(where: { $0.id == id }) {
+                return channel
+            }
+        }
+        return nil
+    }
+    
+    struct ChannelMention: Identifiable {
+        let id: String
+        let range: Range<String.Index>
+        let channelName: String
     }
 }
 
-// MARK: - Flow Layout for Inline Elements
-struct FlowLayout: Layout {
-    var spacing: CGFloat = 4
-    
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let result = FlowResult(in: proposal.width ?? 0, subviews: subviews, spacing: spacing)
-        return result.size
-    }
-    
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let result = FlowResult(in: bounds.width, subviews: subviews, spacing: spacing)
-        for (index, subview) in subviews.enumerated() {
-            subview.place(at: CGPoint(x: bounds.minX + result.positions[index].x,
-                                      y: bounds.minY + result.positions[index].y),
-                         proposal: .unspecified)
-        }
-    }
-    
-    struct FlowResult {
-        var size: CGSize = .zero
-        var positions: [CGPoint] = []
-        
-        init(in maxWidth: CGFloat, subviews: Subviews, spacing: CGFloat) {
-            var x: CGFloat = 0
-            var y: CGFloat = 0
-            var lineHeight: CGFloat = 0
-            
-            for subview in subviews {
-                let size = subview.sizeThatFits(.unspecified)
-                
-                if x + size.width > maxWidth && x > 0 {
-                    x = 0
-                    y += lineHeight + spacing
-                    lineHeight = 0
-                }
-                
-                positions.append(CGPoint(x: x, y: y))
-                lineHeight = max(lineHeight, size.height)
-                x += size.width + spacing
-            }
-            
-            self.size = CGSize(width: maxWidth, height: y + lineHeight)
-        }
-    }
+// Extension to make String conform to Identifiable for sheet presentation
+extension String: Identifiable {
+    public var id: String { self }
 }
 
 // MARK: - Channel Mention Pill

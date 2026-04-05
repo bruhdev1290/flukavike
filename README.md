@@ -25,7 +25,7 @@ This project follows these design principles:
 |---------|-------------|
 | 🎨 **Theme System** | Light, Dark, OLED Dark modes with 10 accent colors |
 | 🏠 **Home Screen** | Server pills, pinned channels, recent conversations |
-| 💬 **Chat Interface** | Message bubbles, reactions, typing indicators, voice messages, rich attachments, inline replies, channel mentions |
+| 💬 **Chat Interface** | Message bubbles, reactions, typing indicators, voice messages, rich attachments, inline replies |
 | 📱 **Navigation** | Customizable tab bar with floating compose button |
 | 🔔 **Notifications** | Push notifications with mentions, DMs, calls |
 | 📞 **Voice/Video Calls** | CallKit integration for calls |
@@ -42,7 +42,6 @@ This project follows these design principles:
 
 - **Hexagon Branding**: Fluxer logo-inspired shapes throughout
 - **Inline Replies**: Long-press any message to reply
-- **Channel Mentions**: Type `<#channelId>` to create clickable channel links with live previews
 - **Custom Context Menus**: Long-press channels/servers for quick actions (star, copy link, etc.)
 - **Toast Notifications**: Visual feedback for actions
 - **Smooth Animations**: Spring-based transitions
@@ -233,16 +232,6 @@ Long-press any message in a chat channel to initiate a reply. The reply preview 
 - Type your reply → Send
 - Original sender sees your reply with context
 
-### Channel Mentions (Embedded Links)
-Messages containing channel references (in Discord format `<#channelId>`) automatically render as clickable channel pills. Clicking a channel mention opens a preview of that channel without leaving the current conversation.
-
-**Features:**
-- Auto-detects channel mentions in message text
-- Shows channel name with icon (text # or voice 🔊)
-- Styled with accent color for visibility
-- Click to open channel in a sheet overlay
-- Works with channels from any server you're in
-
 ### Voice Channel Participant Tracking
 Voice channels now properly display all participants in the channel, not just yourself.
 
@@ -303,7 +292,6 @@ All actions now provide visual feedback via toast notifications that appear at t
 - [x] Inline message replies
 - [x] Voice channel participant tracking
 - [x] Toast notification system
-- [x] Channel mention embeds
 - [ ] Sound effects
 - [ ] Widgets
 
