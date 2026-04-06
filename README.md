@@ -2,6 +2,8 @@
 
 An iOS client for [Fluxer](https://fluxer.app) — a modern messaging platform for communities.
 
+[**Join the TestFlight Beta →**](https://testflight.apple.com/join/xfZsJx31)
+
 ---
 
 ## ✨ Design Philosophy
