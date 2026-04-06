@@ -1,7 +1,6 @@
-
+# Flukavike
 
 An iOS client for [Fluxer](https://fluxer.app) — a modern messaging platform for communities.
-
 
 ---
 
@@ -11,7 +10,7 @@ This project follows these design principles:
 
 - **Polished & Refined**: Every pixel matters, smooth 120fps animations
 - **Playful but Professional**: Delightful micro-interactions without being childish
-- **Customizable**: Multiple themes including OLED Dark mode, 10 accent colors
+- **Customizable**: Multiple themes including OLED Dark mode, 11 accent colors
 - **Content First**: Clean typography, generous whitespace
 - **Native Feel**: Built with SwiftUI for optimal performance
 
@@ -23,34 +22,30 @@ This project follows these design principles:
 
 | Feature | Description |
 |---------|-------------|
-| 🎨 **Theme System** | Light, Dark, OLED Dark modes with 10 accent colors |
+| 🎨 **Theme System** | Light, Dark, OLED Dark modes with 11 accent colors |
 | 🏠 **Home Screen** | Server pills, pinned channels, recent conversations |
 | 💬 **Chat Interface** | Message bubbles, reactions, typing indicators, voice messages, rich attachments, inline replies |
 | 📱 **Navigation** | Customizable tab bar with floating compose button |
 | 🔔 **Notifications** | Push notifications with mentions, DMs, calls |
 | 📞 **Voice/Video Calls** | CallKit integration for calls |
-| 🖥 **Screen Sharing** | Broadcast extension for screen sharing |
-| 🔊 **Voice Channels** | Join voice channels with video support, participant tracking, LiveKit integration, Siri voice commands |
-| 👤 **Profile** | User profiles with stats, tabs, and customization |
+| 🔊 **Voice Channels** | Join voice channels with participant tracking, speaking indicators |
+| 👤 **Profile** | User profiles with stats and customization |
 | ⚙️ **Settings** | Comprehensive settings with appearance options |
-| 🚀 **Onboarding** | Welcome flow with instance selection |
-| 🎤 **Siri Integration** | Send messages, start calls, join voice channels via voice |
-| 📤 **Share Extension** | Share content from any app to Fluxer |
-| ✍️ **Composer** | Rich message composer with attachments |
+| 🚀 **Onboarding** | Welcome flow with web-based OAuth login |
+| 🔐 **Authentication** | Secure token storage in Keychain with web OAuth flow |
+| 📤 **Composer** | Rich message composer with attachments and voice recording |
+| 🔍 **Search** | Global search for messages and content |
+| 📝 **Messages View** | Dedicated messages/DMs interface |
 
 ### Design Highlights
 
 - **Hexagon Branding**: Fluxer logo-inspired shapes throughout
 - **Inline Replies**: Long-press any message to reply
-- **Custom Context Menus**: Long-press channels/servers for quick actions (star, copy link, etc.)
+- **Custom Context Menus**: Long-press channels/servers for quick actions
 - **Toast Notifications**: Visual feedback for actions
 - **Smooth Animations**: Spring-based transitions
 - **Haptic Feedback**: Tactile responses for interactions
 - **Adaptive Colors**: Dynamic text and background colors
-- **Push Notifications**: APNs integration for messages and calls
-- **CallKit**: Native iOS call handling via Fluxer API
-- **Screen Share**: Broadcast upload extension + Fluxer SFU
-- **Voice Channels**: Join channels via Fluxer Gateway
 - **Real-time**: WebSocket events for messages, calls, presence
 
 ---
@@ -58,28 +53,35 @@ This project follows these design principles:
 ## 📁 Project Structure
 
 ```
-FluxerMockup/
+flukavike/
 ├── FluxerApp.swift              # App entry point with push setup
 ├── Services/
-│   ├── PushNotificationService.swift  # APNs handling
 │   ├── APIService.swift         # Fluxer REST API client
 │   ├── WebSocketService.swift   # Real-time Gateway connection
-│   ├── AuthService.swift        # Authentication management
+│   ├── AuthService.swift        # Authentication management (legacy)
+│   ├── WebAuthService.swift     # Web-based OAuth authentication
+│   ├── KeychainTokenStore.swift # Secure token storage
 │   ├── FluxerCallService.swift  # CallKit & voice calls
 │   ├── AudioRecorderService.swift # Voice message recording
 │   ├── AudioPlayerService.swift # Voice message playback
+│   ├── PushNotificationService.swift # APNs handling
 │   └── SiriDonationService.swift # Siri intent donation
 ├── Stores/
 │   └── ThemeManager.swift       # Theme & state management
 ├── Models/
-│   └── Models.swift             # Data models (User, Message, Call, etc.)
+│   └── Models.swift             # Data models (User, Message, Server, etc.)
 ├── Views/
 │   ├── Main/
 │   │   ├── MainTabView.swift    # Bottom tab navigation
-│   │   └── OnboardingView.swift # Welcome & login flow
+│   │   ├── OnboardingView.swift # Welcome & login flow
+│   │   ├── WebLoginView.swift   # Web-based OAuth login
+│   │   └── WebAPILoginView.swift # API-based login fallback
 │   ├── Home/
 │   │   ├── HomeView.swift       # Home dashboard
-│   │   └── ChannelListView.swift # Channel browser
+│   │   ├── ChannelListView.swift # Channel browser
+│   │   └── StarredChannelsView.swift # Starred channels list
+│   ├── Messages/
+│   │   └── MessagesView.swift   # Direct messages view
 │   ├── Chat/
 │   │   └── ChatView.swift       # Message interface with inline replies
 │   ├── Call/
@@ -87,6 +89,8 @@ FluxerMockup/
 │   │   └── VoiceChannelView.swift # Voice channel grid
 │   ├── Compose/
 │   │   └── ComposeView.swift    # Message composer
+│   ├── Search/
+│   │   └── SearchView.swift     # Global search
 │   ├── Notifications/
 │   │   └── NotificationsView.swift
 │   ├── Profile/
@@ -95,23 +99,19 @@ FluxerMockup/
 │   │   └── SettingsView.swift
 │   └── Common/
 │       ├── CommonViews.swift    # Shared UI components
-│       └── ContextMenus.swift   # Channel/server/DM context menus
-├── FluxerBroadcastExtension/    # Screen sharing extension
-│   ├── SampleHandler.swift
-│   └── Info.plist
-├── FluxerIntentExtension/       # Siri intent handling
-│   ├── IntentHandler.swift
-│   └── Info.plist
-├── FluxerShareExtension/        # Share sheet extension
-│   ├── ShareViewController.swift
-│   └── Info.plist
+│       ├── ContextMenus.swift   # Channel/server/DM context menus
+│       └── HCaptchaView.swift   # hCaptcha verification
+├── Intents/
+│   └── FlukavikeIntents.swift   # Siri intent definitions
 └── docs/
     ├── DESIGN.md                # Design system documentation
     ├── SPEC.md                  # Technical specification
     ├── API_REFERENCE.md         # Fluxer API documentation
     ├── API_INTEGRATION.md       # Integration guide
     ├── SIRI_INTEGRATION.md      # Siri setup guide
-    └── PUSH_CALL_SETUP.md       # Push notification setup
+    ├── PUSH_CALL_SETUP.md       # Push notification setup
+    ├── PREVIEW.md               # Preview/testing guide
+    └── ACCESSIBILITY.md         # Accessibility features
 ```
 
 ---
@@ -123,21 +123,15 @@ FluxerMockup/
 - iOS 17.0+
 - Xcode 15.0+
 - Swift 5.9+
+- CocoaPods (for dependencies)
 
 ### Running the Project
 
-1. Open `FluxerMockup` folder in Xcode
-2. Select an iOS Simulator or device
-3. Build and run (⌘+R)
-
-### Project Setup
-
-If you want to start fresh with your own project:
-
-1. Create a new SwiftUI project in Xcode
-2. Copy the files from this mockup
-3. Update bundle identifier and team
-4. Build and run
+1. Clone the repository
+2. Run `pod install` in the project directory
+3. Open `flukavike.xcworkspace` in Xcode
+4. Select an iOS Simulator or device
+5. Build and run (⌘+R)
 
 ---
 
@@ -179,7 +173,7 @@ enum AccentColor: String, CaseIterable, Identifiable {
 
 | Home | Chat | Profile | Settings |
 |------|------|---------|----------|
-| Server pills, recent conversations | Message bubbles, reactions | User stats, tabs | Themes, accent colors |
+| Server pills, recent conversations | Message bubbles, reactions | User stats | Themes, accent colors |
 
 ---
 
@@ -224,81 +218,65 @@ The channel loading flow is:
 
 ## 📝 Recent Updates
 
-### Inline Message Replies
-Long-press any message in a chat channel to initiate a reply. The reply preview appears above the input field showing the author and message content. Replies are linked to the original message and displayed with a "Replying to" indicator.
+### Web-Based OAuth Authentication
+Replaced direct API login with a secure web-based OAuth flow using `ASWebAuthenticationSession`. Tokens are securely stored in the iOS Keychain.
 
-**How it works:**
-- Long-press a message → Reply preview appears
-- Type your reply → Send
-- Original sender sees your reply with context
+### Messages View
+Dedicated interface for direct messages and conversations, separate from server channels.
 
-### Voice Channel Participant Tracking
-Voice channels now properly display all participants in the channel, not just yourself.
+### Search Functionality
+Global search for finding messages, users, and content across servers.
 
-**Features:**
-- See existing participants when joining
-- Real-time updates when users join/leave
-- Speaking indicators update in real-time
-- Mute/deafen status shown per participant
+### Voice Messages
+Record and send voice messages with waveform visualization and playback controls.
 
-### Improved Context Menus
-Long-press on channels or servers now shows functional, relevant options:
-
-**Channel Menu:**
-- ⭐ Star/Unstar channel (functional)
-- 📋 Copy channel link (functional)
-- 👁️ Mark as read (functional)
-- 🔕 Mute channel (coming soon)
-- ℹ️ Channel topic display
-
-**Server Menu:**
-- 📋 Copy server link (functional)
-- 🚪 Leave server (visual feedback)
-- ⚙️ Server settings (coming soon)
-
-**DM Menu:**
-- 📋 Copy user link (functional)
-- ❌ Close DM (visual feedback)
-- 👤 View profile (coming soon)
+### Starred Channels
+Mark channels as favorites for quick access from the home screen.
 
 ### Toast Notification System
-All actions now provide visual feedback via toast notifications that appear at the bottom of the screen:
-- "Channel starred"
-- "Link copied to clipboard"
-- "Marked as read"
+All actions provide visual feedback via toast notifications that appear at the bottom of the screen.
 
 ---
 
 ## 🛠 Roadmap
 
-### Phase 1: Core (Current)
+### Phase 1: Core ✅
 - [x] Basic UI structure
 - [x] Theme system
 - [x] Navigation
-- [x] Mock data
+- [x] Web-based OAuth authentication
 
-### Phase 2: Integration
+### Phase 2: Integration ✅
 - [x] Fluxer API client
 - [x] WebSocket connection
 - [x] Real-time messaging
-- [x] Authentication
 - [x] Gateway-based channel loading
 
-### Phase 3: Polish
-- [x] Custom app icons
+### Phase 3: Polish ✅
 - [x] Push notifications
 - [x] CallKit integration
-- [x] Screen sharing
 - [x] Inline message replies
-- [x] Voice channel participant tracking
+- [x] Voice messages
+- [x] Search functionality
 - [x] Toast notification system
-- [ ] Sound effects
+- [ ] Screen sharing
 - [ ] Widgets
 
-### Phase 4: Advanced
+### Phase 4: Advanced 🚧
 - [ ] iPad multi-column support
-- [x] Share extension
-- [x] Siri integration
+- [ ] Siri integration
+- [ ] Share extension
+
+---
+
+## 📚 Documentation
+
+- [Design System](docs/DESIGN.md) — UI/UX guidelines and design tokens
+- [API Reference](docs/API_REFERENCE.md) — Fluxer API documentation
+- [API Integration](docs/API_INTEGRATION.md) — Integration guide
+- [Push & Call Setup](docs/PUSH_CALL_SETUP.md) — Push notification configuration
+- [Siri Integration](docs/SIRI_INTEGRATION.md) — Siri setup guide
+- [Accessibility](docs/ACCESSIBILITY.md) — Accessibility features
 
 ---
 

@@ -1,4 +1,4 @@
-# Running Fluxer Mobile on iOS Simulator
+# Running Flukavike on iOS Simulator
 
 ## Quick Start
 
@@ -12,32 +12,12 @@ The iOS Simulator has been booted and is ready:
 
 ## How to Run the App
 
-Since this is a SwiftUI mockup project, you need to create an Xcode project and build the app.
+### Build and Run
 
-### Step 1: Create Xcode Project
-
-1. **Open Xcode** on your Mac
-2. **File → New → Project** → Select **iOS** → **App**
-3. **Configure**:
-   - **Name**: `FluxerMockup`
-   - **Interface**: SwiftUI
-   - **Language**: Swift
-   - **Team**: Your Apple ID (or None for simulator only)
-   - **Organization Identifier**: `com.yourname`
-   - **Bundle Identifier**: `com.yourname.fluxermockup` (auto-generated)
-
-### Step 2: Add Source Files
-
-1. In the Project Navigator, **delete** the default files:
-   - `ContentView.swift`
-   - `<YourAppName>App.swift`
-
-2. **Right-click** the project folder → **Add Files to "FluxerMockup"...**
-3. Select **all files** from the `FluxerMockup/` folder in this repo
-4. Make sure **"Copy items if needed"** is checked
-5. Click **Add**
-
-### Step 3: Build and Run
+1. Run `pod install` to install dependencies
+2. Open `flukavike.xcworkspace` in Xcode
+3. Select an iOS Simulator or device
+4. Build and run (⌘+R)
 
 1. Select **iPhone 17 Pro** simulator from the device dropdown
 2. Press **Cmd+R** or click the **Play** button ▶️
@@ -106,10 +86,10 @@ The app will build and launch in the simulator!
 /Applications/Xcode.app/Contents/Developer/usr/bin/simctl boot BE39EAB0-46C7-4EDA-BA62-9A08D6D41443
 
 # Install app (after building)
-xcrun simctl install booted build/Build/Products/Debug-iphonesimulator/FluxerMockup.app
+xcrun simctl install booted build/Build/Products/Debug-iphonesimulator/flukavike.app
 
 # Launch app
-xcrun simctl launch booted com.yourname.fluxermockup
+xcrun simctl launch booted app.fluxer.flukavike
 
 # Take screenshot
 xcrun simctl io booted screenshot screenshot.png
@@ -151,24 +131,17 @@ Once the app is running, try these:
 5. Tap **send** to send, or **X** to cancel
 6. Voice messages display with waveform visualization and playback controls
 
-### Share Extension
-1. Open any app with shareable content (Photos, Safari, Notes)
-2. Tap the **Share** button
-3. Select **"Share to Fluxer"** from the share sheet
-4. Choose a **server** and **channel**
-5. Add an optional message
-6. Tap **Share** to send
+### Voice Messages
+1. Go to **Messages** tab or enter a chat channel
+2. Long-press the **microphone** button (right side of input)
+3. Record your voice message (0.5s minimum, 5 minutes maximum)
+4. Release to see the recording preview
+5. Tap **send** to send, or **X** to cancel
+6. Voice messages display with waveform visualization and playback controls
 
-### Siri Integration
-1. Enable Siri in **Settings → Siri & Search → Fluxer**
-2. Use voice commands:
-   - "Send a message to Alice in Fluxer saying Hello!"
-   - "Start a voice call with Bob in Fluxer"
-   - "Search for messages in Fluxer"
-3. Siri will open the app and perform the action
-
-### Call UI (Mock)
-1. To test incoming call, the CallService is set up but requires actual API
+### Search
+1. Go to **Search** tab
+2. Enter search terms to find messages, users, or content
 
 ---
 
@@ -206,8 +179,8 @@ xcrun simctl erase all  # ⚠️ Deletes all simulator data
 
 To connect to real Fluxer servers:
 
-1. Update `APIService.baseURL` to point to your Fluxer instance
-2. Configure WebRTC for voice/video
+1. The app connects to `web.fluxer.app` by default
+2. Configure your own Fluxer instance URL in settings
 3. Test on physical device (requires Apple Developer Program)
 
 ---
