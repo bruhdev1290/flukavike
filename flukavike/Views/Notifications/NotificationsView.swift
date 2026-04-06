@@ -12,6 +12,7 @@ struct NotificationsView: View {
     
     @State private var selectedFilter: NotificationFilter = .all
     @State private var selectedServerId: String? = nil
+    @State private var sortOrder: SortOrder = .newest
 
     private var notifications: [AppNotification] { appState.notifications }
     
@@ -24,8 +25,17 @@ struct NotificationsView: View {
         var id: String { rawValue }
     }
     
-    var filteredNotifications: [AppNotification] {
-        notifications.filter { notification in
+    enum SortOrder: String, CaseIterable, Identifiable {
+        case newest = "Newest First"
+        case oldest = "Oldest First"
+        case unread = "Unread First"
+        case byServer = "By Server"
+        
+        var id: String { rawValue }
+    }
+    
+    var filteredAndSortedNotifications: [AppNotification] {
+        let filtered = notifications.filter { notification in
             let matchesType: Bool = {
                 switch selectedFilter {
                 case .all:
@@ -45,6 +55,30 @@ struct NotificationsView: View {
             }()
             
             return matchesType && matchesServer
+        }
+        
+        // Sort based on selected sort order
+        switch sortOrder {
+        case .newest:
+            return filtered.sorted { $0.timestamp > $1.timestamp }
+        case .oldest:
+            return filtered.sorted { $0.timestamp < $1.timestamp }
+        case .unread:
+            return filtered.sorted {
+                if $0.read == $1.read {
+                    return $0.timestamp > $1.timestamp
+                }
+                return !$0.read && $1.read
+            }
+        case .byServer:
+            return filtered.sorted {
+                let server0 = $0.serverName ?? ""
+                let server1 = $1.serverName ?? ""
+                if server0 == server1 {
+                    return $0.timestamp > $1.timestamp
+                }
+                return server0 < server1
+            }
         }
     }
     
@@ -67,7 +101,7 @@ struct NotificationsView: View {
     var body: some View {
         NavigationStack {
             List {
-                if filteredNotifications.isEmpty {
+                if filteredAndSortedNotifications.isEmpty {
                     Section {
                         EmptyStateView(
                             icon: "bell.slash",
@@ -79,7 +113,7 @@ struct NotificationsView: View {
                     }
                 } else {
                     Section {
-                        ForEach(filteredNotifications) { notification in
+                        ForEach(filteredAndSortedNotifications) { notification in
                             NotificationRow(notification: notification)
                                 .listRowBackground(themeManager.backgroundPrimary(colorScheme))
                                 .listRowSeparator(.hidden)
@@ -111,27 +145,44 @@ struct NotificationsView: View {
                     HStack(spacing: 12) {
                         // Type Filter
                         Menu {
-                            Button(action: { selectedFilter = .all }) {
-                                Label("All", systemImage: selectedFilter == .all ? "checkmark" : "")
-                            }
-                            Button(action: { selectedFilter = .mentions }) {
-                                Label("Mentions", systemImage: selectedFilter == .mentions ? "checkmark" : "")
-                            }
-                            Button(action: { selectedFilter = .reactions }) {
-                                Label("Reactions", systemImage: selectedFilter == .reactions ? "checkmark" : "")
-                            }
-                            Button(action: { selectedFilter = .messages }) {
-                                Label("Messages", systemImage: selectedFilter == .messages ? "checkmark" : "")
-                            }
-                            
-                            Divider()
-                            
-                            Button("Mark All as Read") {
-                                markAllAsRead()
+                            Section("Filter") {
+                                Button(action: { selectedFilter = .all }) {
+                                    Label("All", systemImage: selectedFilter == .all ? "checkmark" : "")
+                                }
+                                Button(action: { selectedFilter = .mentions }) {
+                                    Label("Mentions", systemImage: selectedFilter == .mentions ? "checkmark" : "")
+                                }
+                                Button(action: { selectedFilter = .reactions }) {
+                                    Label("Reactions", systemImage: selectedFilter == .reactions ? "checkmark" : "")
+                                }
+                                Button(action: { selectedFilter = .messages }) {
+                                    Label("Messages", systemImage: selectedFilter == .messages ? "checkmark" : "")
+                                }
                             }
                             
-                            Button("Clear All", role: .destructive) {
-                                clearAll()
+                            Section("Sort") {
+                                Button(action: { sortOrder = .newest }) {
+                                    Label("Newest First", systemImage: sortOrder == .newest ? "checkmark" : "")
+                                }
+                                Button(action: { sortOrder = .oldest }) {
+                                    Label("Oldest First", systemImage: sortOrder == .oldest ? "checkmark" : "")
+                                }
+                                Button(action: { sortOrder = .unread }) {
+                                    Label("Unread First", systemImage: sortOrder == .unread ? "checkmark" : "")
+                                }
+                                Button(action: { sortOrder = .byServer }) {
+                                    Label("By Server", systemImage: sortOrder == .byServer ? "checkmark" : "")
+                                }
+                            }
+                            
+                            Section {
+                                Button("Mark All as Read") {
+                                    markAllAsRead()
+                                }
+                                
+                                Button("Clear All", role: .destructive) {
+                                    clearAll()
+                                }
                             }
                         } label: {
                             HStack(spacing: 4) {
@@ -142,6 +193,7 @@ struct NotificationsView: View {
                             }
                             .foregroundStyle(themeManager.accentColor.color)
                         }
+                        .accessibilityLabel("Filter and sort notifications")
                         
                         // Server Filter
                         if !uniqueServers.isEmpty {
