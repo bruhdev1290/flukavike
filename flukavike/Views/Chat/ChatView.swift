@@ -146,6 +146,13 @@ struct ChatView: View {
                 .onDisappear {
                     removeWebSocketHandlers()
                 }
+                .onChange(of: channel.id) { _, _ in
+                    // Reload when switching channels
+                    messages = []
+                    loadMessages()
+                    setupWebSocketHandlers()
+                    scrollToBottom(proxy: proxy)
+                }
                 .onChange(of: messages.count) { _, _ in
                     scrollToBottom(proxy: proxy)
                 }

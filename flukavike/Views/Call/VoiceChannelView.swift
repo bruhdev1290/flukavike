@@ -210,9 +210,19 @@ struct VoiceChannelView: View {
             ) {
                 Task {
                     if callService.isScreenSharing {
-                        try? await callService.stopScreenSharing()
+                        do {
+                            try await callService.stopScreenSharing()
+                            await MainActor.run { connectionError = nil }
+                        } catch {
+                            await MainActor.run { connectionError = screenShareErrorMessage(error) }
+                        }
                     } else {
-                        try? await callService.startScreenSharing()
+                        do {
+                            try await callService.startScreenSharing()
+                            await MainActor.run { connectionError = nil }
+                        } catch {
+                            await MainActor.run { connectionError = screenShareErrorMessage(error) }
+                        }
                     }
                 }
             }
@@ -240,6 +250,13 @@ struct VoiceChannelView: View {
         connectionError = nil
         
         do {
+            // If we're already connected to this channel, avoid duplicate join attempts.
+            if callService.selectedVoiceChannel?.id == channel.id,
+               callService.voiceConnection?.room != nil {
+                isConnecting = false
+                return
+            }
+
             // Set up callback for participant updates
             callService.onParticipantsUpdated = { 
                 // Force UI refresh when participants change
@@ -251,9 +268,6 @@ struct VoiceChannelView: View {
             // Store selected channel in service first
             callService.selectedVoiceChannel = channel
             
-            // Fetch existing participants first
-            _ = try? await callService.fetchVoiceChannelParticipants(channelId: channel.id)
-            
             // Join the voice channel with timeout
             try await callService.joinVoiceChannel(channel.id)
             
@@ -261,10 +275,14 @@ struct VoiceChannelView: View {
         } catch {
             print("[VoiceChannel] Failed to join: \(error)")
             isConnecting = false
-            connectionError = "Failed to connect"
-            
-            // Clear selected channel on failure
-            callService.selectedVoiceChannel = nil
+            // Avoid false negative when we already have live participant state.
+            if !callService.voiceParticipants.isEmpty || callService.voiceConnection?.room != nil {
+                connectionError = nil
+            } else {
+                connectionError = "Failed to connect"
+                // Clear selected channel only on true failure.
+                callService.selectedVoiceChannel = nil
+            }
         }
     }
 
@@ -274,6 +292,13 @@ struct VoiceChannelView: View {
             await callService.leaveVoiceChannel()
             dismiss()
         }
+    }
+
+    private func screenShareErrorMessage(_ error: Error) -> String {
+        if case FlukavikeCallService.VoiceError.screenShareUnavailable(let message) = error {
+            return message
+        }
+        return "Unable to start screen sharing."
     }
 }
 
@@ -336,6 +361,15 @@ struct ParticipantTile: View {
     let info: ParticipantInfo
     let isSelf: Bool
     let showCamera: Bool
+    
+    private var participantLabel: String {
+        if isSelf { return "You" }
+        let display = info.user.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let display, !display.isEmpty { return display }
+        let username = info.user.username.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !username.isEmpty { return username }
+        return "Unknown user"
+    }
 
     var body: some View {
         ZStack {
@@ -356,7 +390,7 @@ struct ParticipantTile: View {
                 VStack(spacing: 10) {
                     AvatarView(user: info.user, size: 64, showStatus: false)
 
-                    Text(isSelf ? "You" : info.user.formattedName)
+                    Text(participantLabel)
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(.white)
                         .lineLimit(1)
@@ -392,7 +426,7 @@ struct ParticipantTile: View {
             .padding(10)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(isSelf ? "You" : info.user.formattedName)\(info.isSpeaking ? ", speaking" : "")\(info.isMuted ? ", muted" : "")\(info.isDeafened ? ", deafened" : "")\(info.isScreenSharing ? ", screen sharing" : "")")
+        .accessibilityLabel("\(participantLabel)\(info.isSpeaking ? ", speaking" : "")\(info.isMuted ? ", muted" : "")\(info.isDeafened ? ", deafened" : "")\(info.isScreenSharing ? ", screen sharing" : "")")
     }
 }
 

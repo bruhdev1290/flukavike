@@ -6,10 +6,12 @@
 import SwiftUI
 import CallKit
 import AVFoundation
+import OSLog
 
 @Observable
 class FlukavikeCallService: NSObject {
     static let shared = FlukavikeCallService()
+    private let voiceLog = Logger(subsystem: "com.fluxer.app", category: "Voice")
     
     private let callController = CXCallController()
     private var provider: CXProvider?
@@ -27,6 +29,8 @@ class FlukavikeCallService: NSObject {
     // Voice connection
     var voiceConnection: VoiceConnection?
     var selectedVoiceChannel: Channel?
+    private var joinedVoiceChannelId: String?
+    private var joinedVoiceGuildId: String?
     
     // Voice participants (shared state for UI)
     @MainActor var voiceParticipants: [VoiceParticipant] = []
@@ -215,12 +219,30 @@ class FlukavikeCallService: NSObject {
 
         // Step 3: Connect to LiveKit using the token and endpoint from the gateway
         let conn = VoiceConnection(endpoint: voiceServer.endpoint, token: voiceServer.token)
+        conn.onParticipantsSnapshot = { [weak self] snapshot in
+            self?.applyLiveKitParticipantsSnapshot(snapshot)
+        }
         voiceConnection = conn
         try await conn.connect()
+        joinedVoiceChannelId = channelId
+        joinedVoiceGuildId = voiceServer.guildId ?? guildId
         
         print("[Voice] Connected to LiveKit")
 
         await MainActor.run { self.isMuted = false }
+        publishCurrentVoiceState()
+
+        // Populate occupants after we have successfully joined.
+        // Some backends only return current voice_states once the user is in-channel,
+        // and may need a short propagation delay.
+        let participants = try? await fetchVoiceChannelParticipants(channelId: channelId)
+        if participants?.isEmpty ?? true {
+            try? await Task.sleep(nanoseconds: 750_000_000)
+            _ = try? await fetchVoiceChannelParticipants(channelId: channelId)
+        }
+
+        // Ensure UI has a participant snapshot even if gateway VOICE_STATE_UPDATE events are delayed.
+        syncParticipantsFromLiveKit()
     }
     
     private func findGuildIdForChannel(_ channelId: String) -> String? {
@@ -234,6 +256,7 @@ class FlukavikeCallService: NSObject {
     enum VoiceError: Error {
         case notConnected
         case timeout
+        case screenShareUnavailable(String)
     }
 
     private func withTimeout<T: Sendable>(seconds: Double, operation: @escaping @Sendable () async throws -> T) async throws -> T {
@@ -253,7 +276,9 @@ class FlukavikeCallService: NSObject {
         voiceConnection?.disconnect()
         voiceConnection = nil
         // Tell gateway we left (op 4 with channel_id: null)
-        webSocketService?.sendVoiceLeave(guildId: webSocketService?.currentGuildId)
+        webSocketService?.sendVoiceLeave(guildId: joinedVoiceGuildId ?? webSocketService?.currentGuildId)
+        joinedVoiceChannelId = nil
+        joinedVoiceGuildId = nil
         await MainActor.run { 
             self.selectedVoiceChannel = nil 
             self.voiceParticipants = []
@@ -265,6 +290,7 @@ class FlukavikeCallService: NSObject {
     func toggleMute() async throws {
         isMuted.toggle()
         voiceConnection?.setMute(isMuted)
+        publishCurrentVoiceState()
         if let call = activeCall {
             try? await apiService?.updateCallState(callId: call.id, mute: isMuted, video: isVideoEnabled)
             let muteAction = CXSetMutedCallAction(call: UUID(uuidString: call.id) ?? UUID(), muted: isMuted)
@@ -293,6 +319,7 @@ class FlukavikeCallService: NSObject {
     func toggleDeafen() {
         isDeafened.toggle()
         voiceConnection?.setDeafen(isDeafened)
+        publishCurrentVoiceState()
     }
 
     // MARK: - Camera
@@ -314,26 +341,36 @@ class FlukavikeCallService: NSObject {
     // MARK: - Screen Sharing
     
     func startScreenSharing() async throws {
-        guard let call = activeCall else { return }
-        
-        // Request screen share via API
-        // POST /calls/{call.id}/screen-share
-        try await apiService?.startScreenShare(callId: call.id)
+        guard voiceConnection != nil else {
+            throw VoiceError.screenShareUnavailable("Join a voice channel first.")
+        }
+
+#if targetEnvironment(simulator)
+        throw VoiceError.screenShareUnavailable("Screen sharing is not supported in iOS Simulator. Use a real device.")
+#else
+        BroadcastManager.shared.requestActivation()
+        // Enable actual media capture/publication first.
+        try await voiceConnection?.setScreenShare(true)
+#endif
+
+        // Request screen share via API when this is a call context.
+        if let call = activeCall {
+            try await apiService?.startScreenShare(callId: call.id)
+        }
         
         await MainActor.run {
             self.isScreenSharing = true
         }
-        
-        // Trigger broadcast extension
-        // This is handled by the UI layer showing RPSystemBroadcastPickerView
     }
     
     func stopScreenSharing() async throws {
-        guard let call = activeCall else { return }
-        
-        // Stop via API
-        // DELETE /calls/{call.id}/screen-share
-        try await apiService?.stopScreenShare(callId: call.id)
+        try await voiceConnection?.setScreenShare(false)
+
+        if let call = activeCall {
+            // Stop via API
+            // DELETE /calls/{call.id}/screen-share
+            try await apiService?.stopScreenShare(callId: call.id)
+        }
         
         await MainActor.run {
             self.isScreenSharing = false
@@ -349,6 +386,31 @@ class FlukavikeCallService: NSObject {
             }
         }
     }
+
+    private func publishCurrentVoiceState() {
+        guard let channelId = joinedVoiceChannelId ?? selectedVoiceChannel?.id else { return }
+        let guildId = joinedVoiceGuildId ?? findGuildIdForChannel(channelId)
+        // Log to unified logging and stdout so it shows up in `log stream`.
+        voiceLog.debug("send VOICE_STATE_UPDATE guild=\(guildId ?? "nil") channel=\(channelId) self_mute=\(self.isMuted) self_deaf=\(self.isDeafened)")
+        NSLog("[Voice] send VOICE_STATE_UPDATE guild=%@ channel=%@ self_mute=%@ self_deaf=%@", guildId ?? "nil", channelId, String(isMuted), String(isDeafened))
+        webSocketService?.updateVoiceState(
+            guildId: guildId,
+            channelId: channelId,
+            selfMute: isMuted,
+            selfDeaf: isDeafened
+        )
+        // Some servers expect channel-scoped updates without guild_id.
+        if guildId != nil {
+            voiceLog.debug("send VOICE_STATE_UPDATE guild=nil channel=\(channelId) self_mute=\(self.isMuted) self_deaf=\(self.isDeafened)")
+            NSLog("[Voice] send VOICE_STATE_UPDATE guild=nil channel=%@ self_mute=%@ self_deaf=%@", channelId, String(isMuted), String(isDeafened))
+            webSocketService?.updateVoiceState(
+                guildId: nil,
+                channelId: channelId,
+                selfMute: isMuted,
+                selfDeaf: isDeafened
+            )
+        }
+    }
     
     private func handleCallEnded(_ callId: String) {
         guard activeCall?.id == callId else { return }
@@ -361,6 +423,11 @@ class FlukavikeCallService: NSObject {
     
     private func handleVoiceStateUpdate(_ voiceState: VoiceState) {
         Task { @MainActor in
+            if let selfId = WebAuthService.shared.currentSession?.user.id,
+               voiceState.userId == selfId {
+                voiceLog.debug("self VOICE_STATE_UPDATE channel=\(voiceState.channelId ?? "nil") guild=\(voiceState.guildId ?? "nil") mute=\(voiceState.mute) self_mute=\(voiceState.selfMute) deaf=\(voiceState.deaf) self_deaf=\(voiceState.selfDeaf)")
+                NSLog("[Voice] self VOICE_STATE_UPDATE channel=%@ guild=%@ mute=%@ self_mute=%@ deaf=%@ self_deaf=%@", voiceState.channelId ?? "nil", voiceState.guildId ?? "nil", String(voiceState.mute), String(voiceState.selfMute), String(voiceState.deaf), String(voiceState.selfDeaf))
+            }
             // Channel ID is nil when user leaves the channel
             guard let channelId = voiceState.channelId else {
                 // User left - remove from participants
@@ -430,6 +497,96 @@ class FlukavikeCallService: NSObject {
             }
         }
     }
+
+    private func syncParticipantsFromLiveKit() {
+        guard let room = voiceConnection?.room else { return }
+        let speakingIds = Set(room.activeSpeakers.compactMap { $0.identity?.stringValue })
+        let snapshot = room.remoteParticipants.values.compactMap { participant -> VoiceConnectionParticipant? in
+            guard let id = participant.identity?.stringValue else { return nil }
+            return VoiceConnectionParticipant(
+                id: id,
+                displayName: participant.name,
+                isSpeaking: speakingIds.contains(id) || participant.isSpeaking
+            )
+        }
+        applyLiveKitParticipantsSnapshot(snapshot)
+    }
+
+    private func applyLiveKitParticipantsSnapshot(_ snapshot: [VoiceConnectionParticipant]) {
+        Task { @MainActor in
+            guard let channelId = selectedVoiceChannel?.id else { return }
+
+            let existingById = Dictionary(uniqueKeysWithValues: voiceParticipants.map { ($0.id, $0) })
+            let updatedParticipants: [VoiceParticipant] = snapshot.map { participant in
+                if let existing = existingById[participant.id] {
+                    let resolvedDisplayName = participant.displayName ?? existing.user.displayName
+                    let resolvedUsername: String
+                    if let name = participant.displayName, !name.isEmpty {
+                        resolvedUsername = name
+                    } else if existing.user.username.hasPrefix("user_") {
+                        resolvedUsername = "Participant"
+                    } else {
+                        resolvedUsername = existing.user.username
+                    }
+                    let user = User(
+                        id: existing.user.id,
+                        username: resolvedUsername,
+                        displayName: resolvedDisplayName,
+                        avatarUrl: existing.user.avatarUrl,
+                        bannerUrl: existing.user.bannerUrl,
+                        bio: existing.user.bio,
+                        status: existing.user.status,
+                        customStatus: existing.user.customStatus,
+                        bot: existing.user.bot,
+                        createdAt: existing.user.createdAt
+                    )
+                    return VoiceParticipant(
+                        id: existing.id,
+                        user: user,
+                        voiceState: existing.voiceState,
+                        isSpeaking: participant.isSpeaking
+                    )
+                }
+
+                let fallbackName = participant.displayName ?? "Participant"
+                let user = User(
+                    id: participant.id,
+                    username: fallbackName,
+                    displayName: fallbackName,
+                    avatarUrl: nil,
+                    bannerUrl: nil,
+                    bio: nil,
+                    status: .offline,
+                    customStatus: nil,
+                    bot: false,
+                    createdAt: Date()
+                )
+
+                let voiceState = VoiceState(
+                    userId: participant.id,
+                    channelId: channelId,
+                    guildId: selectedVoiceChannel?.serverId,
+                    mute: false,
+                    deaf: false,
+                    selfMute: false,
+                    selfDeaf: false,
+                    suppress: false,
+                    requestToSpeakTimestamp: nil,
+                    member: nil
+                )
+
+                return VoiceParticipant(
+                    id: participant.id,
+                    user: user,
+                    voiceState: voiceState,
+                    isSpeaking: participant.isSpeaking
+                )
+            }
+
+            voiceParticipants = updatedParticipants
+            onParticipantsUpdated?()
+        }
+    }
     
     /// Fetch current voice channel participants from API
     func fetchVoiceChannelParticipants(channelId: String) async throws -> [VoiceParticipant] {
@@ -437,9 +594,10 @@ class FlukavikeCallService: NSObject {
         let data = try await apiService?.makeRequest(endpoint: "/channels/\(channelId)")
         guard let data = data else { return [] }
         
-        // Parse the response to get voice_states if available
+        // Parse the response to get voice states if available.
+        // Different backends may use snake_case or camelCase keys.
         if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let voiceStates = json["voice_states"] as? [[String: Any]] {
+           let voiceStates = (json["voice_states"] as? [[String: Any]]) ?? (json["voiceStates"] as? [[String: Any]]) {
             
             var participants: [VoiceParticipant] = []
             for state in voiceStates {
@@ -619,6 +777,20 @@ struct VoiceState: Decodable {
         case requestToSpeakTimestamp = "request_to_speak_timestamp"
         case member
     }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        userId = try c.decode(String.self, forKey: .userId)
+        channelId = try c.decodeIfPresent(String.self, forKey: .channelId)
+        guildId = try c.decodeIfPresent(String.self, forKey: .guildId)
+        mute = try c.decodeIfPresent(Bool.self, forKey: .mute) ?? false
+        deaf = try c.decodeIfPresent(Bool.self, forKey: .deaf) ?? false
+        selfMute = try c.decodeIfPresent(Bool.self, forKey: .selfMute) ?? false
+        selfDeaf = try c.decodeIfPresent(Bool.self, forKey: .selfDeaf) ?? false
+        suppress = try c.decodeIfPresent(Bool.self, forKey: .suppress) ?? false
+        requestToSpeakTimestamp = try c.decodeIfPresent(String.self, forKey: .requestToSpeakTimestamp)
+        member = try c.decodeIfPresent(GuildMemberResponse.self, forKey: .member)
+    }
     
     init(userId: String, channelId: String?, guildId: String?, mute: Bool, deaf: Bool, selfMute: Bool, selfDeaf: Bool, suppress: Bool, requestToSpeakTimestamp: String?, member: GuildMemberResponse?) {
         self.userId = userId
@@ -669,6 +841,7 @@ class VoiceConnection {
     let endpoint: String
     let token: String
     private(set) var room: Room?
+    var onParticipantsSnapshot: (([VoiceConnectionParticipant]) -> Void)?
 
     init(endpoint: String, token: String) {
         self.endpoint = endpoint
@@ -676,7 +849,7 @@ class VoiceConnection {
     }
 
     func connect() async throws {
-        let room = Room()
+        let room = Room(delegate: self)
         self.room = room
         let connectOptions = ConnectOptions(autoSubscribe: true)
         let roomOptions = RoomOptions(
@@ -684,11 +857,13 @@ class VoiceConnection {
         )
         try await room.connect(url: endpoint, token: token, connectOptions: connectOptions, roomOptions: roomOptions)
         try await room.localParticipant.setMicrophone(enabled: true)
+        publishParticipantSnapshot()
     }
 
     func disconnect() {
         Task { await room?.disconnect() }
         room = nil
+        onParticipantsSnapshot?([])
     }
 
     func setMute(_ muted: Bool) {
@@ -699,6 +874,13 @@ class VoiceConnection {
         Task { try? await room?.localParticipant.setCamera(enabled: enabled) }
     }
 
+    func setScreenShare(_ enabled: Bool) async throws {
+        guard let room else {
+            throw FlukavikeCallService.VoiceError.notConnected
+        }
+        _ = try await room.localParticipant.setScreenShare(enabled: enabled)
+    }
+
     func setDeafen(_ deafened: Bool) {
         // Set output volume to 0 when deafened via AVAudioSession
         let volume: Float = deafened ? 0 : 1
@@ -707,4 +889,78 @@ class VoiceConnection {
         // deafen is handled at the audio output level
         _ = volume // volume control requires AVAudioPlayer or system API
     }
+
+    private func publishParticipantSnapshot() {
+        guard let room else {
+            onParticipantsSnapshot?([])
+            return
+        }
+        let activeSpeakerIds = Set(room.activeSpeakers.compactMap { $0.identity?.stringValue })
+        let snapshot = room.remoteParticipants.values.compactMap { participant -> VoiceConnectionParticipant? in
+            guard let id = participant.identity?.stringValue else { return nil }
+            let hasTrackPublications = !participant.audioTracks.isEmpty || !participant.videoTracks.isEmpty
+            let isActive = participant.state == .active || participant.state == .joined
+            guard isActive && (hasTrackPublications || participant.isSpeaking || activeSpeakerIds.contains(id)) else {
+                return nil
+            }
+            let displayName = VoiceConnection.resolveDisplayName(
+                identity: id,
+                name: participant.name,
+                metadata: participant.metadata
+            )
+            return VoiceConnectionParticipant(
+                id: id,
+                displayName: displayName,
+                isSpeaking: activeSpeakerIds.contains(id) || participant.isSpeaking
+            )
+        }
+        onParticipantsSnapshot?(snapshot)
+    }
+
+    private static func resolveDisplayName(identity: String, name: String?, metadata: String?) -> String? {
+        func clean(_ value: String?) -> String? {
+            guard let value else { return nil }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { return nil }
+            if trimmed == identity { return nil }
+            return trimmed
+        }
+
+        if let cleaned = clean(name) { return cleaned }
+
+        if let metadata,
+           let data = metadata.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let keys = ["display_name", "global_name", "username", "name", "nick"]
+            for key in keys {
+                if let cleaned = clean(json[key] as? String) { return cleaned }
+            }
+        }
+
+        return nil
+    }
+}
+
+extension VoiceConnection: RoomDelegate {
+    func roomDidConnect(_ room: Room) {
+        publishParticipantSnapshot()
+    }
+
+    func room(_ room: Room, participantDidConnect participant: RemoteParticipant) {
+        publishParticipantSnapshot()
+    }
+
+    func room(_ room: Room, participantDidDisconnect participant: RemoteParticipant) {
+        publishParticipantSnapshot()
+    }
+
+    func room(_ room: Room, didUpdateSpeakingParticipants participants: [Participant]) {
+        publishParticipantSnapshot()
+    }
+}
+
+struct VoiceConnectionParticipant {
+    let id: String
+    let displayName: String?
+    let isSpeaking: Bool
 }

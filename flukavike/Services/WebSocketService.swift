@@ -439,7 +439,10 @@ class WebSocketService: NSObject {
                 "guild_id": guildId as Any,
                 "channel_id": channelId as Any,
                 "self_mute": selfMute,
-                "self_deaf": selfDeaf
+                "self_deaf": selfDeaf,
+                // Some backends mirror mute/deaf from these legacy keys.
+                "mute": selfMute,
+                "deaf": selfDeaf
             ]
         ]
         sendJSON(voiceState)
