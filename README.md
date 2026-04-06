@@ -19,7 +19,7 @@ mentions via @
 
 
 
-## ✨ Design Guidelines 
+## Design Guidelines
 
 This project follows these design principles:
 
@@ -31,26 +31,26 @@ This project follows these design principles:
 
 ---
 
-## 🎨 Features
+## Features
 
 ### Implemented
 
 | Feature | Description |
 |---------|-------------|
-| 🎨 **Theme System** | Light, Dark, OLED Dark modes with 11 accent colors |
-| 🏠 **Home Screen** | Server pills, pinned channels, recent conversations |
-| 💬 **Chat Interface** | Message bubbles, reactions, voice messages, rich attachments,  replies |
-| 📱 **Navigation** | Customizable tab bar with floating compose button |
-| 🔔 **Notifications** | Push notifications with mentions, DMs, calls |
-| 📞 **Voice/Video Calls** | CallKit aka native integration for calls |
-| 🔊 **Voice Channels** | Join voice channels with participant tracking, speaking indicators |
-| 👤 **Profile** | User profiles with stats and customization |
-| ⚙️ **Settings** | Comprehensive settings with appearance options |
-| 🚀 **Onboarding** | Welcome flow with web-based OAuth login |
-| 🔐 **Authentication** | Secure token storage in Keychain with web OAuth flow |
-| 📤 **Composer** | Rich message composer with attachments and voice recording |
-| 🔍 **Search** | Global search for messages and content |
-| 📝 **Messages View** | Dedicated messages/DMs interface |
+| **Theme System** | Light, Dark, OLED Dark modes with 11 accent colors |
+| **Home Screen** | Server pills, pinned channels, recent conversations |
+| **Chat Interface** | Message bubbles, reactions, voice messages, rich attachments, replies |
+| **Navigation** | Customizable tab bar with floating compose button |
+| **Notifications** | Push notifications with mentions, DMs, calls |
+| **Voice/Video Calls** | CallKit native integration for calls |
+| **Voice Channels** | Join voice channels with participant tracking, speaking indicators |
+| **Profile** | User profiles with stats and customization |
+| **Settings** | Comprehensive settings with appearance options |
+| **Onboarding** | Welcome flow with web-based OAuth login |
+| **Authentication** | Secure token storage in Keychain with web OAuth flow |
+| **Composer** | Rich message composer with attachments and voice recording |
+| **Search** | Global search for messages and content |
+| **Messages View** | Dedicated messages/DMs interface |
 
 ### Design Highlights
 
@@ -65,7 +65,7 @@ This project follows these design principles:
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 flukavike/
@@ -131,7 +131,7 @@ flukavike/
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Requirements
 
@@ -150,7 +150,7 @@ flukavike/
 
 ---
 
-## 🎨 Customization
+## Customization
 
 ### Adding a New Theme
 
@@ -184,7 +184,7 @@ enum AccentColor: String, CaseIterable, Identifiable {
 
 ---
 
-## 📱 Screenshots
+## Screenshots
 
 | Home | Chat | Profile | Settings |
 |------|------|---------|----------|
@@ -195,7 +195,7 @@ enum AccentColor: String, CaseIterable, Identifiable {
 
 # What NOT to touch see below
 
-## ⚠️ Critical: Message Decoding — Mixed-Type Fluxer Objects
+## Critical: Message Decoding — Mixed-Type Fluxer Objects
 
 **Do not simplify the `MessageReference` or `EmojiObject` structs in `Models.swift`.**
 
@@ -211,7 +211,7 @@ Both are handled with private typed structs (`MessageReference`, `EmojiObject`) 
 
 ---
 
-## ⚠️ Critical: Channel Loading Architecture
+## Critical: Channel Loading Architecture
 
 **Do not change how channels are fetched without reading this first.**
 
@@ -234,7 +234,7 @@ The channel loading flow is:
 
 ---
 
-## 📝 Recent Updates
+## Recent Updates
 
 
 ### Messages View
@@ -254,21 +254,21 @@ All actions provide visual feedback via toast notifications that appear at the b
 
 ---
 
-## 🛠 Roadmap
+## Roadmap
 
-### Phase 1: Core ✅
+### Phase 1: Core (done)
 - [x] Basic UI structure
 - [x] Theme system
 - [x] Navigation
 - [x] Web-based OAuth authentication
 
-### Phase 2: Integration ✅
+### Phase 2: Integration (done)
 - [x] Fluxer API client
 - [x] WebSocket connection
 - [x] Real-time messaging
 - [x] Gateway-based channel loading
 
-### Phase 3: Polish ✅
+### Phase 3: Polish (mostly done)
 - [x] Push notifications
 - [x] CallKit integration
 - [x] Inline message replies
@@ -278,14 +278,14 @@ All actions provide visual feedback via toast notifications that appear at the b
 - [ ] Screen sharing
 - [ ] Widgets
 
-### Phase 4: Advanced 🚧
+### Phase 4: Advanced (in progress)
 - [ ] iPad multi-column support
 - [ ] Siri integration
 - [ ] Share extension
 
 ---
 
-## 📚 Documentation
+## Documentation
 
 - [Design System](docs/DESIGN.md) — UI/UX guidelines and design tokens
 - [API Reference](docs/API_REFERENCE.md) — Fluxer API documentation
@@ -296,7 +296,7 @@ All actions provide visual feedback via toast notifications that appear at the b
 
 ---
 
-## 📚 Learning Resources
+## Learning Resources
 
 New to Swift/SwiftUI? Here are some helpful resources:
 
@@ -307,7 +307,7 @@ New to Swift/SwiftUI? Here are some helpful resources:
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 This is a learning project! Feel free to:
 
@@ -318,17 +318,17 @@ This is a learning project! Feel free to:
 
 ---
 
-## 📄 License
+## License
 
 MIT License - feel free to use this as a starting point for your own projects.
 
 ---
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - Built for the [Fluxer](https://fluxer.app) platform
 - Created for educational purposes
 
 ---
 
-Made with ❤️ and SwiftUI
+Made with SwiftUI
