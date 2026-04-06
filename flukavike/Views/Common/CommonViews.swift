@@ -41,9 +41,12 @@ struct AvatarView: View {
                     .frame(width: size * 0.3, height: size * 0.3)
                     .overlay(Circle().stroke(themeManager.backgroundPrimary(colorScheme), lineWidth: 2))
                     .offset(x: 2, y: 2)
+                    .accessibilityLabel("Status: \(user.status.accessibilityLabel)")
             }
         }
         .frame(width: size, height: size)
+        .accessibilityLabel("Avatar for \(user.formattedName)")
+        .accessibilityHidden(true)
     }
 
     private var placeholder: some View {
@@ -132,6 +135,7 @@ struct LoadingView: View {
         .onAppear {
             isAnimating = true
         }
+        .accessibilityHidden(true)
     }
 }
 
@@ -221,6 +225,7 @@ struct SearchBar: View {
                         .font(.system(size: 20))
                         .foregroundStyle(themeManager.textTertiary(colorScheme))
                 }
+                .accessibilityLabel("Clear search")
             }
         }
         .padding(.horizontal, 12)

@@ -65,6 +65,7 @@ struct VoiceChannelView: View {
                     .background(Color.white.opacity(0.15))
                     .clipShape(Circle())
             }
+            .accessibilityLabel("Close")
 
             Spacer()
 
@@ -369,6 +370,7 @@ struct ParticipantTile: View {
                     if info.isScreenSharing {
                         Image(systemName: "rectangle.on.rectangle.fill")
                             .voiceBadge(color: .blue)
+                            .accessibilityLabel("Screen sharing")
                     }
                 }
                 Spacer()
@@ -377,16 +379,20 @@ struct ParticipantTile: View {
                     if info.isMuted {
                         Image(systemName: "mic.slash.fill")
                             .voiceBadge(color: .red)
+                            .accessibilityLabel("Muted")
                     }
                     if info.isDeafened {
                         Image(systemName: "speaker.slash.fill")
                             .voiceBadge(color: .orange)
+                            .accessibilityLabel("Deafened")
                     }
                     Spacer()
                 }
             }
             .padding(10)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(isSelf ? "You" : info.user.formattedName)\(info.isSpeaking ? ", speaking" : "")\(info.isMuted ? ", muted" : "")\(info.isDeafened ? ", deafened" : "")\(info.isScreenSharing ? ", screen sharing" : "")")
     }
 }
 
@@ -421,6 +427,7 @@ struct VoiceControlButton: View {
         }
         .frame(maxWidth: .infinity)
         .buttonStyle(PlainButtonStyle())
+        .accessibilityLabel(label)
     }
 }
 

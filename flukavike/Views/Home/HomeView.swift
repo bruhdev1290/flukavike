@@ -116,12 +116,14 @@ struct HomeView: View {
                                 .font(.system(size: 17, weight: .semibold))
                                 .foregroundStyle(themeManager.textPrimary(colorScheme))
                         }
+                        .accessibilityLabel("Refresh servers")
                         
                         Button(action: { activeSheet = .search }) {
                             Image(systemName: "magnifyingglass")
                                 .font(.system(size: 17, weight: .semibold))
                                 .foregroundStyle(themeManager.textPrimary(colorScheme))
                         }
+                        .accessibilityLabel("Search")
                         
                         Button(action: { 
                             print("Settings tapped!")
@@ -131,6 +133,7 @@ struct HomeView: View {
                                 .font(.system(size: 17, weight: .semibold))
                                 .foregroundStyle(themeManager.textPrimary(colorScheme))
                         }
+                        .accessibilityLabel("Settings")
                     }
                 }
             }
@@ -455,6 +458,8 @@ struct ServerPill: View {
             )
         }
         .buttonStyle(PlainButtonStyle())
+        .accessibilityLabel("\(server.name) server\(isSelected ? ", selected" : "")")
+        .accessibilityHint("Double-tap to view channels, long-press for options")
         .onLongPressGesture {
             onLongPress?()
         }
@@ -491,6 +496,7 @@ struct AddServerPill: View {
             )
         }
         .buttonStyle(PlainButtonStyle())
+        .accessibilityLabel("Add server")
     }
 }
 
@@ -508,6 +514,7 @@ struct HomeChannelRow: View {
                 .font(.system(size: 18, weight: .medium))
                 .foregroundStyle(isSelected ? themeManager.accentColor.color : themeManager.textSecondary(colorScheme))
                 .frame(width: 24)
+                .accessibilityHidden(true)
             
             // Channel Name
             Text(channel.name)
@@ -524,6 +531,7 @@ struct HomeChannelRow: View {
                     Circle()
                         .fill(themeManager.accentColor.color)
                         .frame(width: 8, height: 8)
+                        .accessibilityLabel("Unread messages")
                 }
                 
             }
@@ -535,6 +543,17 @@ struct HomeChannelRow: View {
                 .fill(isSelected ? themeManager.accentColor.color.opacity(0.1) : Color.clear)
         )
         .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(channelIconLabel) channel \(channel.name)\(channel.hasUnread ? ", unread messages" : "")\(channel.hasMention ? ", \(channel.mentionCount) mentions" : "")")
+    }
+    
+    private var channelIconLabel: String {
+        switch channel.type {
+        case .text: return "text"
+        case .voice: return "voice"
+        case .category: return "category"
+        case .announcement: return "announcement"
+        }
     }
     
     private var channelIcon: String {

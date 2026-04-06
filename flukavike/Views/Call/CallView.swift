@@ -286,6 +286,26 @@ struct ControlButton: View {
                         .fill(icon == "phone.down.fill" ? color : Color.white.opacity(0.1))
                 )
         }
+        .accessibilityLabel(controlLabel)
+    }
+    
+    private var controlLabel: String {
+        switch icon {
+        case "mic.fill", "mic.slash.fill":
+            return icon == "mic.slash.fill" ? "Unmute" : "Mute"
+        case "video.fill", "video.slash.fill":
+            return icon == "video.slash.fill" ? "Turn on video" : "Turn off video"
+        case "rectangle.inset.filled.and.person.filled", "rectangle.on.rectangle":
+            return icon == "rectangle.inset.filled.and.person.filled" ? "Stop screen sharing" : "Share screen"
+        case "camera.rotate.fill":
+            return "Flip camera"
+        case "speaker.wave.3.fill":
+            return "Speaker"
+        case "phone.down.fill":
+            return "End call"
+        default:
+            return ""
+        }
     }
 }
 
@@ -359,6 +379,7 @@ struct IncomingCallView: View {
                                         .fill(Color.red)
                                 )
                         }
+                        .accessibilityLabel("Decline call")
                         
                         Text("Decline")
                             .font(.system(size: 15))
@@ -381,6 +402,7 @@ struct IncomingCallView: View {
                                         .fill(Color.green)
                                 )
                         }
+                        .accessibilityLabel("Accept call")
                         
                         Text("Accept")
                             .font(.system(size: 15))

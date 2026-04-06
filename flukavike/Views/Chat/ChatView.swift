@@ -274,6 +274,7 @@ struct ChatView: View {
                             .font(.system(size: 20))
                             .foregroundStyle(themeManager.textPrimary(colorScheme))
                     }
+                    .accessibilityLabel("Search messages")
                 }
             }
         }
@@ -682,6 +683,9 @@ struct DiscordMessageBubble: View {
             showContextMenu = true
             HapticFeedback.medium()
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(message.author.formattedName) said \(message.content)")
+        .accessibilityHint("Long press to reply, edit, or add reaction")
         .sheet(isPresented: $showContextMenu) {
             MessageContextMenu(
                 message: message,
@@ -794,7 +798,10 @@ struct DiscordTypingIndicator: View {
             Spacer()
         }
         .onReceive(timer) { _ in
-            animationStep = (animationStep + 1) % 3
+            let reduceMotion = UIAccessibility.isReduceMotionEnabled
+            withAnimation(reduceMotion ? .none : .easeInOut(duration: 0.2)) {
+                animationStep = (animationStep + 1) % 3
+            }
         }
     }
 }
@@ -1109,6 +1116,7 @@ struct DiscordInputView: View {
                         .font(.system(size: 24, weight: .medium))
                         .foregroundStyle(themeManager.accentColor.color)
                 }
+                .accessibilityLabel("Add attachment")
                 
                 // Text Field Container
                 HStack(spacing: 8) {
@@ -1138,6 +1146,7 @@ struct DiscordInputView: View {
                         .font(.system(size: 24))
                         .foregroundStyle(showEmojiPicker ? themeManager.accentColor.color : themeManager.textTertiary(colorScheme))
                 }
+                .accessibilityLabel("Add emoji")
                 .sheet(isPresented: $showEmojiPicker) {
                     EmojiPickerPopover { emoji in
                         text += emoji
@@ -1156,6 +1165,8 @@ struct DiscordInputView: View {
                             .font(.system(size: 24))
                             .foregroundStyle(themeManager.textTertiary(colorScheme))
                     }
+                    .accessibilityLabel("Record voice message")
+                    .accessibilityHint("Hold to record, release to send")
                     .simultaneousGesture(
                         LongPressGesture(minimumDuration: 0.3)
                             .onEnded { _ in
@@ -1180,6 +1191,7 @@ struct DiscordInputView: View {
                             .font(.system(size: 30))
                             .foregroundStyle(themeManager.accentColor.color)
                     }
+                    .accessibilityLabel("Save edit")
                     .transition(.scale.combined(with: .opacity))
                 } else {
                     Button(action: onSend) {
@@ -1187,6 +1199,7 @@ struct DiscordInputView: View {
                             .font(.system(size: 30))
                             .foregroundStyle(themeManager.accentColor.color)
                     }
+                    .accessibilityLabel("Send message")
                     .transition(.scale.combined(with: .opacity))
                 }
             }
@@ -1272,6 +1285,7 @@ struct RecordingDot: View {
             .onAppear {
                 isAnimating = true
             }
+            .accessibilityHidden(true)
     }
 }
 

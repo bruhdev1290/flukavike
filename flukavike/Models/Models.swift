@@ -143,6 +143,16 @@ enum UserStatus: String, Codable, CaseIterable {
         case .invisible: return "circle"
         }
     }
+    
+    var accessibilityLabel: String {
+        switch self {
+        case .online: return "Online"
+        case .idle: return "Idle"
+        case .dnd: return "Do not disturb"
+        case .offline: return "Offline"
+        case .invisible: return "Invisible"
+        }
+    }
 }
 
 // MARK: - Server
