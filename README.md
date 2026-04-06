@@ -1,18 +1,31 @@
 # Flukavike
 
-An iOS client for [Fluxer](https://fluxer.app) — a modern messaging platform for communities.
+An iOS client for [Fluxer](https://fluxer.app) — a modern messaging platform that is a competitor to Discord.
 
 [**Join the TestFlight Beta →**](https://testflight.apple.com/join/xfZsJx31)
 
 ---
 
-## ✨ Design Philosophy
+
+## what doesn't work
+
+Voice channels (joining kinda), camera view lags, and then shuts down microphone mutting is not synced with the Fluxxer backend
+server profile images and profile images
+
+gifs
+
+mentions via @
+
+
+
+
+## ✨ Design Guidelines 
 
 This project follows these design principles:
 
 - **Polished & Refined**: Every pixel matters, smooth 120fps animations
 - **Playful but Professional**: Delightful micro-interactions without being childish
-- **Customizable**: Multiple themes including OLED Dark mode, 11 accent colors
+- **Customizable**: Multiple themes, including OLED Dark mode, 11 accent colors
 - **Content First**: Clean typography, generous whitespace
 - **Native Feel**: Built with SwiftUI for optimal performance
 
@@ -26,10 +39,10 @@ This project follows these design principles:
 |---------|-------------|
 | 🎨 **Theme System** | Light, Dark, OLED Dark modes with 11 accent colors |
 | 🏠 **Home Screen** | Server pills, pinned channels, recent conversations |
-| 💬 **Chat Interface** | Message bubbles, reactions, typing indicators, voice messages, rich attachments, inline replies |
+| 💬 **Chat Interface** | Message bubbles, reactions, voice messages, rich attachments,  replies |
 | 📱 **Navigation** | Customizable tab bar with floating compose button |
 | 🔔 **Notifications** | Push notifications with mentions, DMs, calls |
-| 📞 **Voice/Video Calls** | CallKit integration for calls |
+| 📞 **Voice/Video Calls** | CallKit aka native integration for calls |
 | 🔊 **Voice Channels** | Join voice channels with participant tracking, speaking indicators |
 | 👤 **Profile** | User profiles with stats and customization |
 | ⚙️ **Settings** | Comprehensive settings with appearance options |
@@ -44,11 +57,11 @@ This project follows these design principles:
 - **Hexagon Branding**: Fluxer logo-inspired shapes throughout
 - **Inline Replies**: Long-press any message to reply
 - **Custom Context Menus**: Long-press channels/servers for quick actions
-- **Toast Notifications**: Visual feedback for actions
+- **Toast Notifications WIP**: Visual feedback for actions
 - **Smooth Animations**: Spring-based transitions
 - **Haptic Feedback**: Tactile responses for interactions
 - **Adaptive Colors**: Dynamic text and background colors
-- **Real-time**: WebSocket events for messages, calls, presence
+- **Real-time**: WebSocket events for messages, calls, and presence
 
 ---
 
@@ -122,7 +135,7 @@ flukavike/
 
 ### Requirements
 
-- iOS 17.0+
+- iOS 26.4
 - Xcode 15.0+
 - Swift 5.9+
 - CocoaPods (for dependencies)
@@ -179,6 +192,9 @@ enum AccentColor: String, CaseIterable, Identifiable {
 
 ---
 
+
+# What NOT to touch see below
+
 ## ⚠️ Critical: Message Decoding — Mixed-Type Fluxer Objects
 
 **Do not simplify the `MessageReference` or `EmojiObject` structs in `Models.swift`.**
@@ -220,8 +236,6 @@ The channel loading flow is:
 
 ## 📝 Recent Updates
 
-### Web-Based OAuth Authentication
-Replaced direct API login with a secure web-based OAuth flow using `ASWebAuthenticationSession`. Tokens are securely stored in the iOS Keychain.
 
 ### Messages View
 Dedicated interface for direct messages and conversations, separate from server channels.
