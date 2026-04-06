@@ -1108,7 +1108,6 @@ struct DiscordInputView: View {
     var onAttachPhoto: () -> Void = {}
 
     @State private var showEmojiPicker: Bool = false
-    
     @State private var lastTypingSent: Date = .distantPast
     
     var body: some View {
@@ -1215,6 +1214,7 @@ struct DiscordInputView: View {
             .background(themeManager.backgroundSecondary(colorScheme))
         }
     }
+    
 }
 
 // MARK: - Voice Recording Overlay

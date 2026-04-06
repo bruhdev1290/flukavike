@@ -470,6 +470,11 @@ struct GuildMemberResponse: Decodable {
     var displayName: String {
         nick ?? user?.formattedName ?? "Unknown"
     }
+    
+    init(user: User?, nick: String?) {
+        self.user = user
+        self.nick = nick
+    }
 }
 
 // MARK: - Message

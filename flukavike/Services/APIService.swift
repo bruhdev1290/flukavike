@@ -670,7 +670,24 @@ class APIService {
     /// Returns members of a guild. limit max is typically 1000.
     func getGuildMembers(guildId: String, limit: Int = 100) async throws -> [GuildMemberResponse] {
         let data = try await makeRequest(endpoint: "/guilds/\(guildId)/members?limit=\(limit)")
-        return try JSONDecoder.flukavike.decode([GuildMemberResponse].self, from: data)
+        // Most backends return a bare array, but some wrap it as {"members":[...]}.
+        if let members = try? JSONDecoder.flukavike.decode([GuildMemberResponse].self, from: data) {
+            return members
+        }
+
+        struct MembersWrapper: Decodable {
+            let members: [GuildMemberResponse]
+        }
+        if let wrapped = try? JSONDecoder.flukavike.decode(MembersWrapper.self, from: data) {
+            return wrapped.members
+        }
+
+        let preview = String(data: data, encoding: .utf8) ?? "<non-utf8>"
+        throw APIError.decodingError(NSError(
+            domain: "APIService",
+            code: -1,
+            userInfo: [NSLocalizedDescriptionKey: "Unexpected guild members payload: \(preview.prefix(300))"]
+        ))
     }
 
     func getCurrentUser() async throws -> User {
