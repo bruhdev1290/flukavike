@@ -131,7 +131,7 @@ class ThemeManager {
     
     // Tertiary text - darker gray
     func textTertiary(_ colorScheme: ColorScheme) -> Color {
-        colorScheme == .dark ? Color(white: 0.5) : Color(white: 0.61)
+        colorScheme == .dark ? Color(white: 0.6) : Color(white: 0.5)
     }
     
     // Separator/divider
