@@ -9,6 +9,7 @@ struct HomeShellView: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(\.colorScheme) private var colorScheme
     @Environment(AppState.self) private var appState
+    @AppStorage("useGuildRail") private var useGuildRail: Bool = false
 
     @State private var selectedSection: HomeSection? = .guilds
 
@@ -72,7 +73,11 @@ struct HomeShellView: View {
             StarredChannelsView()
                 .background(themeManager.backgroundPrimary(colorScheme))
         case .guilds, .none:
-            HomeView()
+            if useGuildRail {
+                GuildNavigationView()
+            } else {
+                HomeView()
+            }
         }
     }
 

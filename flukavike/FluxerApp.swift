@@ -137,6 +137,10 @@ struct FluxerApp: App {
 
         apiService.setAuthToken(session.token)
 
+        // Make sure we're using the correct API endpoints before validating.
+        // Discovery is best-effort; if it fails we fall back to the default base URL.
+        _ = try? await apiService.discoverInstance(WebAuthService.webInstanceHost)
+
         // Validate token with the API
         do {
             let user = try await apiService.getCurrentUser()

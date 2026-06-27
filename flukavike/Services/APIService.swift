@@ -48,6 +48,13 @@ class APIService {
         return URL(string: "\(resolvedCDNURL)/icons/\(serverId)/\(hash).\(ext)")
     }
 
+    func serverBannerURL(serverId: String, hash: String?) -> URL? {
+        guard let hash, !hash.isEmpty else { return nil }
+        if hash.hasPrefix("http") { return URL(string: hash) }
+        let ext = hash.hasPrefix("a_") ? "gif" : "webp"
+        return URL(string: "\(resolvedCDNURL)/banners/\(serverId)/\(hash).\(ext)")
+    }
+
     private var activeAuthToken: String? {
         WebAuthService.shared.authToken ?? authToken
     }

@@ -14,6 +14,7 @@ struct ProfileView: View {
     @State private var isLoading: Bool = true
     @State private var errorMessage: String?
     @State private var showEditNote = false
+    @State private var showSettings = false
     @State private var noteText = ""
     
     private var displayUser: User {
@@ -53,8 +54,22 @@ struct ProfileView: View {
             }
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showSettings = true
+                    } label: {
+                        Image(systemName: "gearshape.fill")
+                            .font(.system(size: 18))
+                            .foregroundStyle(themeManager.accentColor.color)
+                    }
+                }
+            }
             .sheet(isPresented: $showEditNote) {
                 NoteEditSheet(noteText: $noteText)
+            }
+            .sheet(isPresented: $showSettings) {
+                SettingsView()
             }
         }
         .onAppear {

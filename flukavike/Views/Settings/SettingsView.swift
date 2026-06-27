@@ -55,6 +55,31 @@ struct SettingsView: View {
                     }
                 }
 
+                // MARK: Home Layout
+                Section("Home") {
+                    Toggle(isOn: .init(
+                        get: { UserDefaults.standard.bool(forKey: "useGuildRail") },
+                        set: { UserDefaults.standard.set($0, forKey: "useGuildRail") }
+                    )) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "sidebar.left")
+                                .font(.system(size: 18))
+                                .foregroundStyle(themeManager.accentColor.color)
+                                .frame(width: 28, height: 28)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Server Rail Layout")
+                                    .font(.system(size: 17))
+                                    .foregroundStyle(themeManager.textPrimary(colorScheme))
+                                Text("Use a Discord-style server rail for servers")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(themeManager.textSecondary(colorScheme))
+                            }
+                        }
+                    }
+                    .listRowBackground(themeManager.backgroundPrimary(colorScheme))
+                }
+
                 // MARK: Appearance
                 Section("Appearance") {
                     NavigationLink(destination: AppearanceSettingsView()) {

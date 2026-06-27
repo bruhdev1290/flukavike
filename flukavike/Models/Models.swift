@@ -265,7 +265,7 @@ struct Server: Identifiable, Decodable, Equatable {
 }
 
 // MARK: - Channel
-struct Channel: Identifiable, Decodable, Equatable {
+struct Channel: Identifiable, Decodable, Equatable, Hashable {
     let id: String
     let serverId: String
     let name: String
