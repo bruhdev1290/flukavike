@@ -19,8 +19,8 @@ struct User: Identifiable, Codable, Equatable {
     let bot: Bool
     let createdAt: Date
 
-    var displayUsername: String { "@\(username)" }
-    var formattedName: String { displayName ?? username }
+    nonisolated var displayUsername: String { "@\(username)" }
+    nonisolated var formattedName: String { displayName ?? username }
 
     // Memberwise initialiser (used by previews and internal construction).
     init(

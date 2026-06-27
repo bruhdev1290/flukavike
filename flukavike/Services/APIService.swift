@@ -926,6 +926,12 @@ class APIService {
         return try JSONDecoder.flukavike.decode([RelationshipResponse].self, from: data)
     }
 
+    /// Returns a user by ID.
+    func getUser(id: String) async throws -> User {
+        let data = try await makeRequest(endpoint: "/users/\(id)")
+        return try JSONDecoder.flukavike.decode(User.self, from: data)
+    }
+
     /// Returns members of a guild. limit max is typically 1000.
     func getGuildMembers(guildId: String, limit: Int = 100) async throws -> [GuildMemberResponse] {
         let data = try await makeRequest(endpoint: "/guilds/\(guildId)/members?limit=\(limit)")
@@ -1029,7 +1035,10 @@ class APIService {
     }
     
     func sendMessage(channelId: String, content: String, replyToId: String? = nil) async throws -> Message {
-        var body: [String: Any] = ["content": content]
+        var body: [String: Any] = [
+            "content": content,
+            "allowed_mentions": allowedMentionsDictionary(for: content)
+        ]
         if let replyToId = replyToId {
             body["message_reference"] = [
                 "message_id": replyToId,
@@ -1043,6 +1052,36 @@ class APIService {
             body: bodyData
         )
         return try JSONDecoder.flukavike.decode(Message.self, from: data)
+    }
+
+    private func allowedMentionsDictionary(for content: String) -> [String: Any] {
+        var parse: [String] = []
+        if content.contains("@everyone") || content.contains("@here") {
+            parse.append("everyone")
+        }
+
+        let userIDs = matches(for: #"<@!?(\d+)>"#, in: content)
+        let roleIDs = matches(for: #"<@&(\d+)>"#, in: content)
+        let channelIDs = matches(for: #"<#(\d+)>"#, in: content)
+
+        return [
+            "parse": parse,
+            "users": userIDs,
+            "roles": roleIDs,
+            "channels": channelIDs,
+            "replied_user": true
+        ]
+    }
+
+    private func matches(for pattern: String, in string: String) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return [] }
+        let range = NSRange(string.startIndex..., in: string)
+        return regex.matches(in: string, options: [], range: range).compactMap { match in
+            guard match.numberOfRanges > 1 else { return nil }
+            let groupRange = match.range(at: 1)
+            guard let swiftRange = Range(groupRange, in: string) else { return nil }
+            return String(string[swiftRange])
+        }
     }
     
     func sendMessageWithAttachment(
@@ -1232,7 +1271,13 @@ class APIService {
     // MARK: - Message Editing
     
     func editMessage(channelId: String, messageId: String, content: String) async throws -> Message {
-        let body: [String: Any] = ["content": content]
+        let body: [String: Any] = [
+            "content": content,
+            "allowed_mentions": [
+                "parse": ["users", "roles", "everyone"],
+                "replied_user": true
+            ]
+        ]
         let bodyData = try JSONSerialization.data(withJSONObject: body)
         let data = try await makeRequest(
             endpoint: "/channels/\(channelId)/messages/\(messageId)",

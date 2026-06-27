@@ -208,6 +208,7 @@ struct ChatView: View {
             
             // Input Area
             DiscordInputView(
+                channel: channel,
                 text: $messageText,
                 isTyping: $isTyping,
                 isSending: $isSending,
@@ -815,82 +816,213 @@ struct DiscordTypingIndicator: View {
 
 // MARK: - Message Content View (with Channel Mentions)
 struct MessageContentView: View {
+    @Environment(ThemeManager.self) private var themeManager
     @Environment(AppState.self) private var appState
+    @Environment(\.dismiss) private var dismiss
+
     let content: String
     var font: Font = .system(size: 15)
-    
-    @State private var selectedChannelId: String?
-    
-    // Regex pattern for Discord-style channel mentions: <#channelId>
-    private static let channelMentionPattern = try! NSRegularExpression(pattern: "<#(\\d+)>", options: [])
-    
+
+    @State private var userNames: [String: String] = [:]
+    @State private var selectedMentionURL: MentionURL?
+
+    private struct MentionURL: Identifiable {
+        let id = UUID()
+        let url: URL
+    }
+
     var body: some View {
-        textWithChannelMentions
+        attributedText
             .font(font)
             .lineSpacing(2)
-            .sheet(item: $selectedChannelId) { channelId in
-                if let channel = findChannel(id: channelId) {
-                    NavigationStack {
-                        ChatView(channel: channel)
-                    }
-                }
+            .environment(\.openURL, OpenURLAction { url in
+                selectedMentionURL = MentionURL(url: url)
+                return .handled
+            })
+            .sheet(item: $selectedMentionURL) { url in
+                mentionSheet(for: url)
+            }
+            .task(id: mentionUserIds) {
+                await resolveUserNames()
             }
     }
-    
-    @ViewBuilder
-    private var textWithChannelMentions: some View {
-        // Build an attributed string with channel mentions highlighted
-        let parsed = parseContent()
-        
-        if parsed.mentions.isEmpty {
-            // No mentions, just show plain text
-            Text(content)
-        } else {
-            // Show text with channel mention buttons overlay
-            Text(parsed.displayText)
-                .overlay(
-                    mentionOverlays(for: parsed.mentions)
-                )
+
+    // MARK: - Mention parsing
+
+    private enum MentionKind {
+        case user(id: String)
+        case channel(id: String)
+        case role(id: String)
+        case everyone
+        case here
+    }
+
+    private struct Segment {
+        let text: String
+        let mention: MentionKind?
+    }
+
+    private var segments: [Segment] {
+        let patterns: [(kind: (String) -> MentionKind?, regex: NSRegularExpression)] = [
+            ({ .user(id: $0) }, try! NSRegularExpression(pattern: "<@!?(\\d+)>", options: [])),
+            ({ .channel(id: $0) }, try! NSRegularExpression(pattern: "<#(\\d+)>", options: [])),
+            ({ .role(id: $0) }, try! NSRegularExpression(pattern: "<@&(\\d+)>", options: [])),
+            ({ _ in .everyone }, try! NSRegularExpression(pattern: "@everyone", options: [])),
+            ({ _ in .here }, try! NSRegularExpression(pattern: "@here", options: [])),
+        ]
+
+        let nsRange = NSRange(content.startIndex..., in: content)
+        var allMatches: [(range: Range<String.Index>, kind: MentionKind, replacement: String)] = []
+
+        for (kindFactory, regex) in patterns {
+            for match in regex.matches(in: content, options: [], range: nsRange) {
+                guard let range = Range(match.range, in: content) else { continue }
+                let idOrEmpty: String
+                if match.numberOfRanges > 1, let idRange = Range(match.range(at: 1), in: content) {
+                    idOrEmpty = String(content[idRange])
+                } else {
+                    idOrEmpty = ""
+                }
+                guard let kind = kindFactory(idOrEmpty) else { continue }
+                let replacement: String
+                switch kind {
+                case .user: replacement = "@\(userNames[idOrEmpty] ?? idOrEmpty)"
+                case .channel: replacement = "#\(channelName(for: idOrEmpty) ?? idOrEmpty)"
+                case .role: replacement = "@role"
+                case .everyone: replacement = "@everyone"
+                case .here: replacement = "@here"
+                }
+                allMatches.append((range, kind, replacement))
+            }
+        }
+
+        let sorted = allMatches.sorted { $0.range.lowerBound < $1.range.lowerBound }
+        var filtered: [(range: Range<String.Index>, kind: MentionKind, replacement: String)] = []
+        for match in sorted {
+            if filtered.last?.range.overlaps(match.range) == true { continue }
+            filtered.append(match)
+        }
+
+        var result: [Segment] = []
+        var lastEnd = content.startIndex
+        for match in filtered {
+            if match.range.lowerBound > lastEnd {
+                result.append(Segment(text: String(content[lastEnd..<match.range.lowerBound]), mention: nil))
+            }
+            result.append(Segment(text: match.replacement, mention: match.kind))
+            lastEnd = match.range.upperBound
+        }
+        if lastEnd < content.endIndex {
+            result.append(Segment(text: String(content[lastEnd..<content.endIndex]), mention: nil))
+        }
+        return result
+    }
+
+    private var mentionUserIds: [String] {
+        segments.compactMap {
+            if case .user(let id) = $0.mention { return id }
+            return nil
         }
     }
-    
-    private func mentionOverlays(for mentions: [ChannelMention]) -> some View {
-        GeometryReader { geo in
-            // This is a simplified approach - for a production app,
-            // we'd use UITextView with NSTextAttachment for proper inline buttons
-            // For now, we'll show channel mentions as separate tappable elements below the text
+
+    private var attributedText: Text {
+        let md = markdownString()
+        do {
+            let attr = try AttributedString(
+                markdown: md,
+                options: AttributedString.MarkdownParsingOptions(
+                    interpretedSyntax: .inlineOnlyPreservingWhitespace
+                )
+            )
+            return Text(attr)
+        } catch {
+            return Text(content)
+        }
+    }
+
+    private func markdownString() -> String {
+        var md = ""
+        for segment in segments {
+            if let mention = segment.mention {
+                switch mention {
+                case .user(let id):
+                    let name = escapeMarkdown(userNames[id] ?? id)
+                    md += "[@\(name)](mention://user/\(id))"
+                case .channel(let id):
+                    let name = escapeMarkdown(channelName(for: id) ?? id)
+                    md += "[#\(name)](mention://channel/\(id))"
+                case .role(let id):
+                    md += "[@role](mention://role/\(id))"
+                case .everyone:
+                    md += "[@everyone](mention://everyone)"
+                case .here:
+                    md += "[@here](mention://here)"
+                }
+            } else {
+                md += escapeMarkdown(segment.text)
+            }
+        }
+        return md
+    }
+
+    private func escapeMarkdown(_ text: String) -> String {
+        var result = text
+        for char in ["\\", "[", "]", "(", ")", "`", "*", "_", "~"] {
+            result = result.replacingOccurrences(of: char, with: "\\\\\(char)")
+        }
+        return result
+    }
+
+    private func channelName(for id: String) -> String? {
+        for server in appState.gatewayGuilds {
+            if let channel = server.channels.first(where: { $0.id == id }) {
+                return channel.name
+            }
+        }
+        return nil
+    }
+
+    private func resolveUserNames() async {
+        await withTaskGroup(of: (String, String?).self) { group in
+            for id in mentionUserIds {
+                group.addTask {
+                    if let user = await UserCache.shared.user(withId: id) {
+                        return (id, user.formattedName)
+                    }
+                    return (id, nil)
+                }
+            }
+            var names: [String: String] = [:]
+            for await (id, name) in group {
+                if let name { names[id] = name }
+            }
+            if !names.isEmpty {
+                await MainActor.run { userNames.merge(names) { _, new in new } }
+            }
+        }
+    }
+
+    // MARK: - Interaction
+
+    @ViewBuilder
+    private func mentionSheet(for mentionURL: MentionURL) -> some View {
+        let url = mentionURL.url
+        switch url.host {
+        case "user":
+            if let id = url.pathComponents.last {
+                UserMentionSheet(userId: id)
+            }
+        case "channel":
+            if let id = url.pathComponents.last, let channel = findChannel(id: id) {
+                NavigationStack {
+                    ChatView(channel: channel)
+                }
+            }
+        default:
             EmptyView()
         }
     }
-    
-    private func parseContent() -> (displayText: String, mentions: [ChannelMention]) {
-        var mentions: [ChannelMention] = []
-        var displayText = content
-        
-        let nsRange = NSRange(content.startIndex..., in: content)
-        let matches = MessageContentView.channelMentionPattern.matches(in: content, options: [], range: nsRange)
-        
-        // Process matches in reverse order to preserve string indices
-        for match in matches.reversed() {
-            guard let matchRange = Range(match.range, in: content),
-                  let channelIdRange = Range(match.range(at: 1), in: content) else { continue }
-            
-            let channelId = String(content[channelIdRange])
-            let mention = ChannelMention(
-                id: channelId,
-                range: matchRange,
-                channelName: findChannel(id: channelId)?.name ?? "unknown-channel"
-            )
-            mentions.append(mention)
-            
-            // Replace the mention with a readable format
-            let replacement = "#\(mention.channelName)"
-            displayText.replaceSubrange(matchRange, with: replacement)
-        }
-        
-        return (displayText, mentions.reversed())
-    }
-    
+
     private func findChannel(id: String) -> Channel? {
         for server in appState.gatewayGuilds {
             if let channel = server.channels.first(where: { $0.id == id }) {
@@ -899,83 +1031,52 @@ struct MessageContentView: View {
         }
         return nil
     }
-    
-    struct ChannelMention: Identifiable {
-        let id: String
-        let range: Range<String.Index>
-        let channelName: String
-    }
 }
 
-// Extension to make String conform to Identifiable for sheet presentation
-extension String: Identifiable {
-    public var id: String { self }
-}
-
-// MARK: - Channel Mention Pill
-struct ChannelMentionPill: View {
+// MARK: - User Mention Sheet
+struct UserMentionSheet: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(AppState.self) private var appState
-    let channelId: String
-    
-    @State private var showChannelSheet = false
-    
-    private var channel: Channel? {
-        // Search in all guilds for this channel
-        for server in appState.gatewayGuilds {
-            if let channel = server.channels.first(where: { $0.id == channelId }) {
-                return channel
-            }
-        }
-        return nil
-    }
-    
-    private var server: Server? {
-        for server in appState.gatewayGuilds {
-            if server.channels.contains(where: { $0.id == channelId }) {
-                return server
-            }
-        }
-        return nil
-    }
-    
+    @Environment(\.dismiss) private var dismiss
+    let userId: String
+
+    @State private var user: User?
+
     var body: some View {
-        Button(action: {
-            if channel != nil {
-                showChannelSheet = true
-                HapticFeedback.light()
-            }
-        }) {
-            HStack(spacing: 4) {
-                Image(systemName: channel?.type == .voice ? "speaker.wave.2.fill" : "number")
-                    .font(.system(size: 12))
-                Text(channel?.name ?? "unknown-channel")
-                    .font(.system(size: 14, weight: .medium))
-            }
-            .foregroundStyle(themeManager.accentColor.color)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(themeManager.accentColor.color.opacity(0.15))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(themeManager.accentColor.color.opacity(0.3), lineWidth: 1)
-            )
-        }
-        .buttonStyle(PlainButtonStyle())
-        .sheet(isPresented: $showChannelSheet) {
-            if let channel = channel {
-                NavigationStack {
-                    ChatView(channel: channel)
+        NavigationStack {
+            ZStack {
+                themeManager.backgroundPrimary(colorScheme).ignoresSafeArea()
+                VStack(spacing: 20) {
+                    if let user {
+                        AvatarView(user: user, size: 100)
+                        Text(user.formattedName)
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundStyle(themeManager.textPrimary(colorScheme))
+                        Text(user.displayUsername)
+                            .font(.system(size: 16))
+                            .foregroundStyle(themeManager.textSecondary(colorScheme))
+                    } else {
+                        ProgressView()
+                    }
+                    Spacer()
                 }
+                .padding(.top, 40)
+            }
+            .navigationTitle("User")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Close") { dismiss() }
+                }
+            }
+            .task {
+                user = await UserCache.shared.user(withId: userId)
             }
         }
     }
 }
 
+// MARK: - Reply Preview View
 // MARK: - Reply Preview View
 struct ReplyPreviewView: View {
     @Environment(ThemeManager.self) private var themeManager
@@ -1093,13 +1194,15 @@ struct ReplyReferenceView: View {
 struct DiscordInputView: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(AppState.self) private var appState
+    let channel: Channel
     @Binding var text: String
     @Binding var isTyping: Bool
     @Binding var isSending: Bool
     @Binding var isRecording: Bool
     @Binding var replyingTo: Message?
     @Binding var editingMessage: Message?
-    
+
     var onSend: () -> Void
     var onEdit: () -> Void
     var onTyping: () -> Void
@@ -1109,12 +1212,28 @@ struct DiscordInputView: View {
 
     @State private var showEmojiPicker: Bool = false
     @State private var lastTypingSent: Date = .distantPast
-    
+
+    // Mention autocomplete state
+    @State private var mentionSuggestions: [MentionSuggestion] = []
+    @State private var mentionTokenRange: Range<String.Index>?
+    @State private var mentionPrefix: String = "@"
+    @State private var showMentionPicker: Bool = false
+    @State private var isLoadingMentions: Bool = false
+    @State private var guildMembers: [GuildMemberResponse] = []
+
+    private var apiService: APIService { APIService.shared }
+
     var body: some View {
         VStack(spacing: 0) {
+            // Mention autocomplete picker
+            if showMentionPicker {
+                mentionPicker
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
             Divider()
                 .background(themeManager.separator(colorScheme))
-            
+
             HStack(spacing: 12) {
                 // Plus/Attachment Button
                 Button(action: onAttachPhoto) {
@@ -1123,13 +1242,14 @@ struct DiscordInputView: View {
                         .foregroundStyle(themeManager.accentColor.color)
                 }
                 .accessibilityLabel("Add attachment")
-                
+
                 // Text Field Container
                 HStack(spacing: 8) {
-                    TextField(editingMessage != nil ? "Edit message" : "Message #general", text: $text)
+                    TextField(editingMessage != nil ? "Edit message" : "Message #\(channel.name)", text: $text)
                         .font(.system(size: 16))
                         .foregroundStyle(themeManager.textPrimary(colorScheme))
                         .onChange(of: text) { _, newValue in
+                            updateMentions(for: newValue)
                             if !newValue.isEmpty && editingMessage == nil {
                                 let now = Date()
                                 if now.timeIntervalSince(lastTypingSent) > 3 {
@@ -1145,7 +1265,7 @@ struct DiscordInputView: View {
                     RoundedRectangle(cornerRadius: 20)
                         .fill(themeManager.backgroundTertiary(colorScheme))
                 )
-                
+
                 // Emoji Button
                 Button(action: { showEmojiPicker.toggle() }) {
                     Image(systemName: "face.smiling")
@@ -1214,7 +1334,192 @@ struct DiscordInputView: View {
             .background(themeManager.backgroundSecondary(colorScheme))
         }
     }
-    
+
+    // MARK: - Mention Autocomplete
+
+    private struct MentionSuggestion: Identifiable {
+        let id: String
+        let prefix: String
+        let displayName: String
+        let subtitle: String?
+    }
+
+    private var mentionPicker: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(isLoadingMentions ? "Loading..." : "Mentions")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(themeManager.textTertiary(colorScheme))
+                    .textCase(.uppercase)
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(mentionSuggestions) { suggestion in
+                        Button {
+                            insertMention(suggestion)
+                        } label: {
+                            HStack(spacing: 12) {
+                                ZStack {
+                                    Circle()
+                                        .fill(themeManager.accentColor.color.opacity(0.15))
+                                        .frame(width: 32, height: 32)
+                                    Text(suggestion.prefix)
+                                        .font(.system(size: 14, weight: .bold))
+                                        .foregroundStyle(themeManager.accentColor.color)
+                                }
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(suggestion.displayName)
+                                        .font(.system(size: 15, weight: .medium))
+                                        .foregroundStyle(themeManager.textPrimary(colorScheme))
+                                    if let subtitle = suggestion.subtitle {
+                                        Text(subtitle)
+                                            .font(.system(size: 13))
+                                            .foregroundStyle(themeManager.textSecondary(colorScheme))
+                                    }
+                                }
+
+                                Spacer()
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+
+                        Divider()
+                            .padding(.leading, 56)
+                            .background(themeManager.separator(colorScheme))
+                    }
+                }
+            }
+            .frame(maxHeight: 220)
+        }
+        .background(themeManager.backgroundSecondary(colorScheme))
+    }
+
+    private func updateMentions(for newText: String) {
+        guard let token = currentMentionToken(in: newText) else {
+            showMentionPicker = false
+            mentionTokenRange = nil
+            return
+        }
+
+        mentionPrefix = token.prefix
+        mentionTokenRange = token.range
+        showMentionPicker = true
+
+        if token.prefix == "@" && guildMembers.isEmpty && !isLoadingMentions {
+            loadGuildMembers()
+        }
+
+        mentionSuggestions = filteredMentions(prefix: token.prefix, query: token.query)
+    }
+
+    private func currentMentionToken(in text: String) -> (prefix: String, query: String, range: Range<String.Index>)? {
+        guard let range = text.range(of: "[@#]\\S*$", options: .regularExpression) else { return nil }
+        let token = String(text[range])
+        let prefix = String(token.prefix(1))
+        let query = String(token.dropFirst())
+        return (prefix, query, range)
+    }
+
+    private func filteredMentions(prefix: String, query: String) -> [MentionSuggestion] {
+        let lower = query.lowercased()
+        if prefix == "@" {
+            var results: [MentionSuggestion] = []
+            if lower.isEmpty || "everyone".contains(lower) {
+                results.append(MentionSuggestion(
+                    id: "everyone",
+                    prefix: "@",
+                    displayName: "everyone",
+                    subtitle: "Notify everyone in this channel"
+                ))
+            }
+            if lower.isEmpty || "here".contains(lower) {
+                results.append(MentionSuggestion(
+                    id: "here",
+                    prefix: "@",
+                    displayName: "here",
+                    subtitle: "Notify online members"
+                ))
+            }
+            results += guildMembers.compactMap { member in
+                guard let user = member.user else { return nil }
+                let display = member.displayName
+                if lower.isEmpty
+                    || display.lowercased().contains(lower)
+                    || user.username.lowercased().contains(lower) {
+                    return MentionSuggestion(
+                        id: user.id,
+                        prefix: "@",
+                        displayName: display,
+                        subtitle: "@\(user.username)"
+                    )
+                }
+                return nil
+            }
+            return results
+        } else {
+            // Channel mentions from the current server
+            guard let server = appState.gatewayGuilds.first(where: { $0.id == channel.serverId }) else {
+                return []
+            }
+            return server.channels
+                .filter { $0.type != .category }
+                .compactMap { ch in
+                    if lower.isEmpty || ch.name.lowercased().contains(lower) {
+                        return MentionSuggestion(
+                            id: ch.id,
+                            prefix: "#",
+                            displayName: ch.name,
+                            subtitle: nil
+                        )
+                    }
+                    return nil
+                }
+        }
+    }
+
+    private func loadGuildMembers() {
+        guard !channel.serverId.isEmpty else { return }
+        isLoadingMentions = true
+        Task {
+            do {
+                let members = try await apiService.getGuildMembers(guildId: channel.serverId, limit: 100)
+                await MainActor.run {
+                    guildMembers = members
+                    if let token = currentMentionToken(in: text) {
+                        mentionSuggestions = filteredMentions(prefix: token.prefix, query: token.query)
+                    }
+                    isLoadingMentions = false
+                }
+            } catch {
+                await MainActor.run { isLoadingMentions = false }
+            }
+        }
+    }
+
+    private func insertMention(_ suggestion: MentionSuggestion) {
+        guard let range = mentionTokenRange else { return }
+        let replacement: String
+        if suggestion.id == "everyone" || suggestion.id == "here" {
+            replacement = "@\(suggestion.id) "
+        } else if suggestion.prefix == "@" {
+            replacement = "<@\(suggestion.id)> "
+        } else {
+            replacement = "<#\(suggestion.id)> "
+        }
+        var newText = text
+        newText.replaceSubrange(range, with: replacement)
+        text = newText
+        showMentionPicker = false
+        mentionTokenRange = nil
+    }
 }
 
 // MARK: - Voice Recording Overlay
