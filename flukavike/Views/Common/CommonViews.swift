@@ -16,6 +16,7 @@ struct AvatarView: View {
 
     private var resolvedURL: URL? {
         APIService.shared.avatarURL(userId: user.id, hash: user.avatarUrl)
+            ?? APIService.shared.defaultAvatarURL(userId: user.id)
     }
 
     var body: some View {

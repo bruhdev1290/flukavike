@@ -77,6 +77,7 @@ struct SettingsView: View {
                             }
                         }
                     }
+                    .tint(themeManager.accentColor.color)
                     .listRowBackground(themeManager.backgroundPrimary(colorScheme))
                 }
 

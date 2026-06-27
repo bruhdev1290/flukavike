@@ -46,6 +46,9 @@ struct ProfileView: View {
                     }
                 }
                 .background(themeManager.backgroundPrimary(colorScheme))
+                .refreshable {
+                    await fetchCurrentUser()
+                }
                 
                 // Loading overlay
                 if isLoading && user == nil && appState.currentUser == nil {
@@ -74,6 +77,16 @@ struct ProfileView: View {
         }
         .onAppear {
             loadUser()
+        }
+        .onChange(of: appState.isAuthenticated) { _, authenticated in
+            if authenticated && user == nil {
+                Task { await fetchCurrentUser() }
+            }
+        }
+        .task(id: appState.currentUser?.id) {
+            if let currentUser = appState.currentUser {
+                await MainActor.run { self.user = currentUser }
+            }
         }
     }
     
@@ -304,12 +317,14 @@ struct ProfileView: View {
         
         do {
             let fetchedUser = try await APIService.shared.getCurrentUser()
+            print("[Profile] Fetched current user \(fetchedUser.id) – avatar: \(fetchedUser.avatarUrl ?? "nil")")
             await MainActor.run {
                 self.user = fetchedUser
                 self.appState.currentUser = fetchedUser
                 self.isLoading = false
             }
         } catch {
+            print("[Profile] Failed to fetch current user: \(error)")
             await MainActor.run {
                 self.errorMessage = error.localizedDescription
                 self.isLoading = false

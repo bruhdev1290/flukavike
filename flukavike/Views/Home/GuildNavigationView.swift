@@ -10,20 +10,23 @@ struct GuildNavigationView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(AppState.self) private var appState
 
-    @State private var servers: [Server] = []
-    @State private var selectedServer: Server?
-    @State private var channels: [Channel] = []
     @State private var isLoadingServers: Bool = false
     @State private var isLoadingChannels: Bool = false
     @State private var channelsError: String?
     @State private var showJoinServerSheet: Bool = false
     @State private var showSettings: Bool = false
+    @State private var selectedChannel: Channel?
+    @State private var showMessages: Bool = false
 
     private let apiService = APIService.shared
 
     private var isAuthenticated: Bool {
         appState.isAuthenticated
     }
+
+    private var servers: [Server] { appState.railServers }
+    private var selectedServer: Server? { appState.railSelectedServer }
+    private var channels: [Channel] { appState.railChannels }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -58,10 +61,10 @@ struct GuildNavigationView: View {
         }
         .sheet(isPresented: $showJoinServerSheet) {
             JoinServerView { server in
-                if !servers.contains(where: { $0.id == server.id }) {
-                    servers.insert(server, at: 0)
+                if !appState.railServers.contains(where: { $0.id == server.id }) {
+                    appState.railServers.insert(server, at: 0)
                 }
-                selectedServer = server
+                selectServer(server)
                 Task { await loadChannels(for: server) }
             }
             .environment(themeManager)
@@ -72,34 +75,48 @@ struct GuildNavigationView: View {
                 .environment(themeManager)
                 .environment(appState)
         }
-        .navigationDestination(for: Channel.self) { channel in
+        .sheet(item: $selectedChannel) { channel in
             Group {
                 if channel.type == .voice {
                     VoiceChannelView(channel: channel)
                         .environment(themeManager)
                         .environment(appState)
                 } else {
-                    ChatView(channel: channel)
-                        .environment(themeManager)
-                        .environment(appState)
-                }
-            }
-        }
-        .onAppear {
-            if servers.isEmpty {
-                if isAuthenticated {
-                    Task { await loadServers() }
-                } else {
-                    servers = Server.previewServers
-                    selectedServer = servers.first
-                    if let server = selectedServer {
-                        channels = server.channels.sorted { $0.position < $1.position }
+                    NavigationStack {
+                        ChatView(channel: channel)
+                            .environment(themeManager)
+                            .environment(appState)
                     }
                 }
             }
         }
+        .sheet(isPresented: $showMessages) {
+            NavigationStack {
+                MessagesView()
+                    .environment(themeManager)
+                    .environment(appState)
+            }
+        }
+        .onAppear {
+            if appState.railServers.isEmpty {
+                if isAuthenticated {
+                    Task { await loadServers() }
+                } else {
+                    let preview = Server.previewServers
+                    appState.railServers = preview
+                    if let first = preview.first {
+                        selectServer(first)
+                        Task { await loadChannels(for: first) }
+                    }
+                }
+            } else if appState.railSelectedServer == nil {
+                if let first = appState.railServers.first {
+                    selectServer(first)
+                }
+            }
+        }
         .onChange(of: appState.gatewayGuilds) { _, _ in
-            guard let server = selectedServer else { return }
+            guard let server = appState.railSelectedServer else { return }
             Task { await loadChannels(for: server) }
         }
     }
@@ -114,7 +131,7 @@ struct GuildNavigationView: View {
                     icon: "bubble.left.fill",
                     isSelected: false,
                     color: .green,
-                    action: { /* TODO: open DM list from rail */ }
+                    action: { showMessages = true }
                 )
                 .accessibilityLabel("Direct Messages")
 
@@ -149,7 +166,7 @@ struct GuildNavigationView: View {
     private func railServerButton(server: Server) -> some View {
         let selected = selectedServer?.id == server.id
         return Button {
-            selectedServer = server
+            selectServer(server)
             Task { await loadChannels(for: server) }
         } label: {
             ZStack(alignment: .leading) {
@@ -248,13 +265,19 @@ struct GuildNavigationView: View {
                             }
 
                             ForEach(categoryChannels) { channel in
-                                NavigationLink(value: channel) {
-                                    HomeChannelRow(
-                                        channel: channel,
-                                        isSelected: false
-                                    )
+                                HomeChannelRow(
+                                    channel: channel,
+                                    isSelected: false
+                                )
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    selectedChannel = channel
+                                    appState.selectedChannel = channel
                                 }
-                                .buttonStyle(.plain)
+                                .onLongPressGesture {
+                                    // TODO: channel context menu
+                                    HapticFeedback.medium()
+                                }
 
                                 if channel.id != categoryChannels.last?.id {
                                     Divider()
@@ -291,21 +314,27 @@ struct GuildNavigationView: View {
                     .frame(height: 80)
             }
 
-            HStack(spacing: 10) {
-                if let server = selectedServer {
-                    ServerIconView(server: server, size: 40, cornerRadius: 12)
+            ZStack {
+                HStack {
+                    if let server = selectedServer {
+                        ServerIconView(server: server, size: 40, cornerRadius: 12)
+                    }
+                    Spacer()
                 }
 
                 Text(selectedServer?.name ?? "Select a server")
                     .font(.system(size: 18, weight: .bold))
                     .foregroundStyle(themeManager.textPrimary(colorScheme))
                     .shadow(radius: selectedServer?.bannerUrl != nil ? 2 : 0)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .center)
 
-                Spacer()
-
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(themeManager.textTertiary(colorScheme))
+                HStack {
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(themeManager.textTertiary(colorScheme))
+                }
             }
             .padding(12)
             .background(
@@ -330,27 +359,28 @@ struct GuildNavigationView: View {
             let fetched = try await apiService.getUserGuilds()
             await MainActor.run {
                 if !fetched.isEmpty {
-                    servers = fetched
+                    appState.railServers = fetched
                     appState.restServers = fetched
                 } else {
-                    servers = Server.previewServers
+                    appState.railServers = Server.previewServers
                 }
-                if selectedServer == nil {
-                    selectedServer = servers.first
+                if appState.railSelectedServer == nil {
+                    appState.railSelectedServer = appState.railServers.first
                 }
                 isLoadingServers = false
             }
-            if let server = selectedServer ?? servers.first {
+            if let server = appState.railSelectedServer ?? appState.railServers.first {
                 await loadChannels(for: server)
             }
         } catch {
             await MainActor.run {
-                servers = Server.previewServers
-                selectedServer = servers.first
+                let preview = Server.previewServers
+                appState.railServers = preview
+                appState.railSelectedServer = preview.first
                 isLoadingServers = false
-                if let server = selectedServer {
-                    channels = server.channels.sorted { $0.position < $1.position }
-                }
+            }
+            if let server = appState.railSelectedServer {
+                await loadChannels(for: server)
             }
         }
     }
@@ -359,42 +389,38 @@ struct GuildNavigationView: View {
         await MainActor.run {
             isLoadingChannels = true
             channelsError = nil
-            channels = []
         }
 
+        let loaded: [Channel]
         if let gatewayGuild = appState.gatewayGuilds.first(where: { $0.id == server.id }),
            !gatewayGuild.channels.isEmpty {
-            await MainActor.run {
-                channels = gatewayGuild.channels.sorted { $0.position < $1.position }
-                appState.selectedServer = server
-                isLoadingChannels = false
+            loaded = gatewayGuild.channels.sorted { $0.position < $1.position }
+        } else if !server.channels.isEmpty {
+            loaded = server.channels.sorted { $0.position < $1.position }
+        } else {
+            do {
+                loaded = try await apiService.getGuildChannels(guildId: server.id)
+                    .sorted { $0.position < $1.position }
+            } catch {
+                await MainActor.run {
+                    channelsError = "Failed to load channels: \(error.localizedDescription)"
+                    isLoadingChannels = false
+                }
+                return
             }
-            return
         }
 
-        if !server.channels.isEmpty {
-            await MainActor.run {
-                channels = server.channels.sorted { $0.position < $1.position }
-                appState.selectedServer = server
-                isLoadingChannels = false
-            }
-            return
+        await MainActor.run {
+            appState.railChannels = loaded
+            appState.railSelectedServer = server
+            appState.selectedServer = server
+            isLoadingChannels = false
         }
+    }
 
-        do {
-            let fetched = try await apiService.getGuildChannels(guildId: server.id)
-            await MainActor.run {
-                channels = fetched.sorted { $0.position < $1.position }
-                appState.selectedServer = server
-                isLoadingChannels = false
-            }
-        } catch {
-            await MainActor.run {
-                channelsError = "Failed to load channels: \(error.localizedDescription)"
-                appState.selectedServer = server
-                isLoadingChannels = false
-            }
-        }
+    private func selectServer(_ server: Server) {
+        appState.railSelectedServer = server
+        appState.selectedServer = server
     }
 
     // MARK: - Channel Grouping Helpers

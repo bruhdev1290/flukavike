@@ -29,7 +29,7 @@ class APIService {
 
     /// CDN base URL, falling back to the canonical Fluxer CDN if discovery hasn't run.
     var resolvedCDNURL: String {
-        cdnURL.isEmpty ? "https://cdn.fluxer.app" : cdnURL
+        cdnURL.isEmpty ? "https://fluxerusercontent.com" : cdnURL
     }
 
     /// Builds a full CDN URL for a user avatar hash.
@@ -38,6 +38,12 @@ class APIService {
         if hash.hasPrefix("http") { return URL(string: hash) }
         let ext = hash.hasPrefix("a_") ? "gif" : "webp"
         return URL(string: "\(resolvedCDNURL)/avatars/\(userId)/\(hash).\(ext)")
+    }
+
+    /// Default avatar URL for users without a custom avatar.
+    func defaultAvatarURL(userId: String) -> URL? {
+        let index = (UInt64(userId) ?? 0) % 6
+        return URL(string: "https://fluxerstatic.com/avatars/\(index).png")
     }
 
     /// Builds a full CDN URL for a server icon hash.

@@ -174,6 +174,12 @@ class AppState {
         }
         return gatewayGuilds.first(where: { $0.id == serverId })?.name ?? ""
     }
+
+    // MARK: - Server Rail Layout State
+    // Stored in AppState so it survives tab switches and view recreation.
+    var railServers: [Server] = []
+    var railSelectedServer: Server?
+    var railChannels: [Channel] = []
     
     var isAuthenticated: Bool {
         WebAuthService.shared.isAuthenticated
