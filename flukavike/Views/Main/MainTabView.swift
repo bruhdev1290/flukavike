@@ -1,5 +1,6 @@
 //
 //  MainTabView.swift
+//  3-branch shell matching the Flutter client: Home / Notifications / You
 //
 
 import SwiftUI
@@ -12,44 +13,34 @@ struct MainTabView: View {
 
     enum Tab: String, CaseIterable, Identifiable {
         case home = "Home"
-        case chat = "Chat"
-        case starred = "Starred"
         case notifications = "Notifications"
+        case you = "You"
 
         var id: String { rawValue }
 
         var icon: String {
             switch self {
             case .home: return "house.fill"
-            case .chat: return "bubble.left.fill"
-            case .starred: return "star.fill"
             case .notifications: return "bell.fill"
+            case .you: return "person.fill"
             }
         }
     }
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            NavigationStack { HomeView() }
+            HomeShellView()
                 .tag(Tab.home)
                 .tabItem { Image(systemName: Tab.home.icon); Text(Tab.home.rawValue) }
 
-            NavigationStack { MessagesView() }
-                .tag(Tab.chat)
-                .tabItem { Image(systemName: Tab.chat.icon); Text(Tab.chat.rawValue) }
-                .badge(appState.unreadMessages > 0 ? appState.unreadMessages : 0)
-
-            NavigationStack { 
-                StarredChannelsView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-                .tag(Tab.starred)
-                .tabItem { Image(systemName: Tab.starred.icon); Text(Tab.starred.rawValue) }
-
-            NavigationStack { NotificationsView() }
+            NotificationsView()
                 .tag(Tab.notifications)
                 .tabItem { Image(systemName: Tab.notifications.icon); Text(Tab.notifications.rawValue) }
                 .badge(appState.unreadNotifications > 0 ? appState.unreadNotifications : 0)
+
+            ProfileView()
+                .tag(Tab.you)
+                .tabItem { Image(systemName: Tab.you.icon); Text(Tab.you.rawValue) }
         }
         .tint(themeManager.textPrimary(colorScheme))
     }

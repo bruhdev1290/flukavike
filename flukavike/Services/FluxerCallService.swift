@@ -423,8 +423,9 @@ class FlukavikeCallService: NSObject {
     
     private func handleVoiceStateUpdate(_ voiceState: VoiceState) {
         Task { @MainActor in
-            if let selfId = WebAuthService.shared.currentSession?.user.id,
-               voiceState.userId == selfId {
+            if let session = WebAuthService.shared.currentSession,
+               let user = session.user,
+               voiceState.userId == user.id {
                 voiceLog.debug("self VOICE_STATE_UPDATE channel=\(voiceState.channelId ?? "nil") guild=\(voiceState.guildId ?? "nil") mute=\(voiceState.mute) self_mute=\(voiceState.selfMute) deaf=\(voiceState.deaf) self_deaf=\(voiceState.selfDeaf)")
                 NSLog("[Voice] self VOICE_STATE_UPDATE channel=%@ guild=%@ mute=%@ self_mute=%@ deaf=%@ self_deaf=%@", voiceState.channelId ?? "nil", voiceState.guildId ?? "nil", String(voiceState.mute), String(voiceState.selfMute), String(voiceState.deaf), String(voiceState.selfDeaf))
             }

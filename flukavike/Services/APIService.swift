@@ -376,10 +376,13 @@ class APIService {
         if let errorString = json["error"] as? String, !errorString.isEmpty {
             return errorString
         }
-        if let nested = json["error"] as? [String: Any],
-           let message = nested["message"] as? String,
-           !message.isEmpty {
-            return message
+        if let nested = json["error"] as? [String: Any] {
+            if let message = nested["message"] as? String, !message.isEmpty {
+                return message
+            }
+            if let errorString = nested["error"] as? String, !errorString.isEmpty {
+                return errorString
+            }
         }
         return nil
     }
@@ -550,7 +553,251 @@ class APIService {
             method: "POST"
         )
     }
-    
+
+    // MARK: - Auth v2 / Flutter parity endpoints
+
+    func loginRaw(instance: String, email: String, password: String, captchaKey: String? = nil, inviteCode: String? = nil) async throws -> Data {
+        try await discoverInstance(instance)
+        var body: [String: String] = [
+            "email": email,
+            "password": password
+        ]
+        var headers: [String: String] = [:]
+        if let captchaKey {
+            body["captcha_key"] = captchaKey
+            headers["X-Captcha-Token"] = captchaKey
+            headers["X-Captcha-Type"] = captchaTypeHeaderValue()
+        }
+        if let inviteCode {
+            body["invite_code"] = inviteCode
+        }
+        let bodyData = try JSONEncoder.flukavike.encode(body)
+        return try await makeRequest(
+            endpoint: "/auth/login",
+            method: "POST",
+            body: bodyData,
+            includeAuthorization: false,
+            additionalHeaders: headers
+        )
+    }
+
+    func registerRaw(
+        instance: String,
+        email: String,
+        password: String,
+        dateOfBirth: String,
+        username: String? = nil,
+        displayName: String? = nil,
+        inviteCode: String? = nil,
+        captchaKey: String? = nil
+    ) async throws -> Data {
+        try await discoverInstance(instance)
+        var body: [String: Any] = [
+            "email": email,
+            "password": password,
+            "date_of_birth": dateOfBirth,
+            "consent": true
+        ]
+        if let username, !username.isEmpty { body["username"] = username }
+        if let displayName, !displayName.isEmpty { body["global_name"] = displayName }
+        if let inviteCode, !inviteCode.isEmpty { body["invite_code"] = inviteCode }
+        var headers: [String: String] = [:]
+        if let captchaKey {
+            body["captcha_key"] = captchaKey
+            headers["X-Captcha-Token"] = captchaKey
+            headers["X-Captcha-Type"] = captchaTypeHeaderValue()
+        }
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        return try await makeRequest(
+            endpoint: "/auth/register",
+            method: "POST",
+            body: bodyData,
+            includeAuthorization: false,
+            additionalHeaders: headers
+        )
+    }
+
+    func forgotPassword(email: String) async throws {
+        let body = ["email": email]
+        let bodyData = try JSONEncoder.flukavike.encode(body)
+        _ = try await makeRequest(
+            endpoint: "/auth/forgot-password",
+            method: "POST",
+            body: bodyData,
+            includeAuthorization: false
+        )
+    }
+
+    func resetPassword(token: String, password: String) async throws -> Data {
+        let body = [
+            "token": token,
+            "password": password
+        ]
+        let bodyData = try JSONEncoder.flukavike.encode(body)
+        return try await makeRequest(
+            endpoint: "/auth/reset-password",
+            method: "POST",
+            body: bodyData,
+            includeAuthorization: false
+        )
+    }
+
+    func getUsernameSuggestions(globalName: String) async throws -> [String] {
+        let body = ["global_name": globalName]
+        let bodyData = try JSONEncoder.flukavike.encode(body)
+        let data = try await makeRequest(
+            endpoint: "/auth/username-suggestions",
+            method: "POST",
+            body: bodyData,
+            includeAuthorization: false
+        )
+        struct SuggestionsResponse: Decodable {
+            let suggestions: [String]
+        }
+        return try JSONDecoder.flukavike.decode(SuggestionsResponse.self, from: data).suggestions
+    }
+
+    func verifyMfaTotp(ticket: String, code: String) async throws -> Data {
+        let body = [
+            "code": code,
+            "ticket": ticket
+        ]
+        let bodyData = try JSONEncoder.flukavike.encode(body)
+        return try await makeRequest(
+            endpoint: "/auth/mfa/totp",
+            method: "POST",
+            body: bodyData,
+            includeAuthorization: false
+        )
+    }
+
+    func verifyMfaSms(ticket: String, code: String) async throws -> Data {
+        let body = [
+            "code": code,
+            "ticket": ticket
+        ]
+        let bodyData = try JSONEncoder.flukavike.encode(body)
+        return try await makeRequest(
+            endpoint: "/auth/mfa/sms",
+            method: "POST",
+            body: bodyData,
+            includeAuthorization: false
+        )
+    }
+
+    func sendMfaSms(ticket: String) async throws {
+        let body = ["ticket": ticket]
+        let bodyData = try JSONEncoder.flukavike.encode(body)
+        _ = try await makeRequest(
+            endpoint: "/auth/mfa/sms/send",
+            method: "POST",
+            body: bodyData,
+            includeAuthorization: false
+        )
+    }
+
+    func getMfaWebauthnOptions(ticket: String) async throws -> [String: Any] {
+        let body = ["ticket": ticket]
+        let bodyData = try JSONEncoder.flukavike.encode(body)
+        let data = try await makeRequest(
+            endpoint: "/auth/mfa/webauthn/options",
+            method: "POST",
+            body: bodyData,
+            includeAuthorization: false
+        )
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw APIError.decodingError(NSError(domain: "APIService", code: -1))
+        }
+        return json
+    }
+
+    func verifyMfaWebauthn(ticket: String, response: [String: Any], challenge: String) async throws -> Data {
+        var body: [String: Any] = [
+            "ticket": ticket,
+            "challenge": challenge,
+            "response": response
+        ]
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        return try await makeRequest(
+            endpoint: "/auth/mfa/webauthn",
+            method: "POST",
+            body: bodyData,
+            includeAuthorization: false
+        )
+    }
+
+    func pollIpAuthorization(ticket: String) async throws -> Data {
+        return try await makeRequest(
+            endpoint: "/auth/ip-authorization?ticket=\(ticket)",
+            method: "GET",
+            includeAuthorization: false
+        )
+    }
+
+    func resendIpAuthorization(ticket: String) async throws {
+        let body = ["ticket": ticket]
+        let bodyData = try JSONEncoder.flukavike.encode(body)
+        _ = try await makeRequest(
+            endpoint: "/auth/ip-authorization/resend",
+            method: "POST",
+            body: bodyData,
+            includeAuthorization: false
+        )
+    }
+
+    func startSso(redirectTo: String? = nil) async throws -> SsoStartResponse {
+        var body: [String: String] = [:]
+        if let redirectTo { body["redirect_to"] = redirectTo }
+        let bodyData = try JSONEncoder.flukavike.encode(body)
+        let data = try await makeRequest(
+            endpoint: "/auth/sso",
+            method: "POST",
+            body: bodyData,
+            includeAuthorization: false
+        )
+        return try JSONDecoder.flukavike.decode(SsoStartResponse.self, from: data)
+    }
+
+    func completeSso(code: String, state: String) async throws -> Data {
+        let body = [
+            "code": code,
+            "state": state
+        ]
+        let bodyData = try JSONEncoder.flukavike.encode(body)
+        return try await makeRequest(
+            endpoint: "/auth/sso/complete",
+            method: "POST",
+            body: bodyData,
+            includeAuthorization: false
+        )
+    }
+
+    func getPasskeyLoginOptions() async throws -> [String: Any] {
+        let data = try await makeRequest(
+            endpoint: "/auth/webauthn/options",
+            method: "GET",
+            includeAuthorization: false
+        )
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw APIError.decodingError(NSError(domain: "APIService", code: -1))
+        }
+        return json
+    }
+
+    func loginWithPasskey(response: [String: Any], challenge: String) async throws -> Data {
+        let body: [String: Any] = [
+            "response": response,
+            "challenge": challenge
+        ]
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        return try await makeRequest(
+            endpoint: "/auth/webauthn",
+            method: "POST",
+            body: bodyData,
+            includeAuthorization: false
+        )
+    }
+
     func makeRequest(
         endpoint: String,
         method: String = "GET",
@@ -641,7 +888,6 @@ class APIService {
             throw APIError.rateLimited
         default:
             print("[API] Error \(httpResponse.statusCode): \(rawBody)")
-            let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["message"] as? String
             throw APIError.serverError(statusCode: httpResponse.statusCode, message: message)
         }
     }
@@ -1035,8 +1281,7 @@ struct InstanceConfig: Decodable {
     let publicInstance: Bool?
     let userCount: Int?
     let version: String?
-    let features: [String]?
-    
+
     enum CodingKeys: String, CodingKey {
         case api, gateway, cdn
         case publicApi = "public_api"
@@ -1045,7 +1290,7 @@ struct InstanceConfig: Decodable {
         case name, description, icon, banner
         case publicInstance = "public_instance"
         case userCount = "user_count"
-        case version, features
+        case version
     }
 
     private struct EndpointsConfig: Decodable {
@@ -1115,7 +1360,6 @@ struct InstanceConfig: Decodable {
         self.publicInstance = try container.decodeIfPresent(Bool.self, forKey: .publicInstance)
         self.userCount = try container.decodeIfPresent(Int.self, forKey: .userCount)
         self.version = try container.decodeIfPresent(String.self, forKey: .version)
-        self.features = try container.decodeIfPresent([String].self, forKey: .features)
     }
     
     struct CaptchaConfig: Decodable {

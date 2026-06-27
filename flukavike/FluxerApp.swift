@@ -21,23 +21,33 @@ struct FluxerApp: App {
     // State
     @State private var themeManager = ThemeManager()
     @State private var appState = AppState()
-    @State private var authService = AuthService.shared
-    
+
     // View State
     @State private var showIncomingCall = false
     @State private var showActiveCall = false
     @State private var toastManager = ToastManager.shared
-    
+
+    // Startup
+    enum StartupState {
+        case checking
+        case needsAuth
+        case authenticated
+    }
+    @State private var startupState: StartupState = .checking
+
     // Lifecycle
     @Environment(\.scenePhase) private var scenePhase
-    
+
     var body: some Scene {
         WindowGroup {
             Group {
-                if webAuthService.isAuthenticated {
+                switch startupState {
+                case .checking:
+                    SplashView()
+                case .needsAuth:
+                    LoginView()
+                case .authenticated:
                     authenticatedView
-                } else {
-                    OnboardingView()
                 }
             }
             .environment(themeManager)
@@ -57,6 +67,9 @@ struct FluxerApp: App {
                       let channelId = info["channelId"] as? String,
                       let serverId  = info["serverId"]  as? String else { return }
                 appState.pendingChannelNavigation = AppState.ChannelNavigation(serverId: serverId, channelId: channelId)
+            }
+            .onChange(of: webAuthService.isAuthenticated) { _, isAuthenticated in
+                startupState = isAuthenticated ? .authenticated : .needsAuth
             }
         }
     }
@@ -98,24 +111,67 @@ struct FluxerApp: App {
     private func initializeServices() {
         // Configure services
         callService.configure(apiService: apiService, webSocketService: webSocketService)
-        
+
         // Setup WebSocket handlers
         setupWebSocketHandlers()
-        
+
         // Setup Call handlers
         setupCallHandlers()
-        
+
         // Setup Push notifications
         setupPushNotifications()
-        
-        // Try to migrate from legacy auth if needed
+
+        // Validate or migrate session on launch
         Task {
-            await webAuthService.migrateFromLegacyIfNeeded()
-            
-            // Connect to gateway if authenticated
+            await performStartup()
+        }
+    }
+
+    private func performStartup() async {
+        await webAuthService.migrateFromLegacyIfNeeded()
+
+        guard let session = WebAuthService.shared.currentSession else {
+            await MainActor.run { startupState = .needsAuth }
+            return
+        }
+
+        apiService.setAuthToken(session.token)
+
+        // Validate token with the API
+        do {
+            let user = try await apiService.getCurrentUser()
+            let resolvedSession = WebSession(
+                token: session.token,
+                refreshToken: session.refreshToken,
+                user: user,
+                expiresAt: session.expiresAt
+            )
             await MainActor.run {
+                WebAuthService.shared.setSession(resolvedSession)
+                appState.currentUser = user
+                startupState = .authenticated
+            }
+            connectIfAuthenticated()
+        } catch let error as APIError {
+            if case .unauthorized = error {
+                await MainActor.run {
+                    WebAuthService.shared.clearSession()
+                    startupState = .needsAuth
+                }
+            } else {
+                // Server unreachable but token exists — stay authenticated and retry later
+                await MainActor.run {
+                    appState.currentUser = session.user
+                    startupState = .authenticated
+                }
                 connectIfAuthenticated()
             }
+        } catch {
+            await MainActor.run {
+                appState.currentUser = session.user
+                startupState = .authenticated
+            }
+            connectIfAuthenticated()
         }
     }
     
@@ -437,10 +493,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     }
     
     private func handleDeepLink(url: URL) -> Bool {
-        guard url.scheme == "fluxer" else { return false }
-        
+        guard url.scheme == "fluxer" || url.scheme == "flukavike" else { return false }
+
         let pathComponents = url.pathComponents.filter { $0 != "/" }
-        
+
         switch pathComponents.first {
         case "channel":
             if pathComponents.count >= 3 {
@@ -452,7 +508,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 ])
             }
             return true
-            
+
         case "user":
             if pathComponents.count >= 2 {
                 let userId = pathComponents[1]
@@ -461,7 +517,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 ])
             }
             return true
-            
+
         case "call":
             if pathComponents.count >= 2 {
                 let userId = pathComponents[1]
@@ -471,7 +527,17 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 ])
             }
             return true
-            
+
+        case "reset":
+            if let token = url.fragment?.replacingOccurrences(of: "token=", with: "") {
+                NotificationCenter.default.post(
+                    name: .init("ResetPasswordIntent"),
+                    object: nil,
+                    userInfo: ["token": token]
+                )
+            }
+            return true
+
         default:
             return false
         }
