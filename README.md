@@ -7,16 +7,11 @@ An iOS client for [Fluxer](https://fluxer.app) — a modern messaging platform t
 ---
 
 
-## what doesn't work
+## Known Issues
 
-Voice channels (joining kinda), camera view lags, and then shuts down microphone mutting is not synced with the Fluxxer backend
-server profile images and profile images
+Voice channels, camera view, and microphone mute syncing with the Fluxer backend are now working. Server profile images, GIFs, and @mentions are also fixed.
 
-gifs
-
-mentions via @
-
-
+No known issues at this time — report anything via **Settings → Contact Support**.
 
 
 ## Design Guidelines
@@ -25,7 +20,7 @@ This project follows these design principles:
 
 - **Polished & Refined**: Every pixel matters, smooth 120fps animations
 - **Playful but Professional**: Delightful micro-interactions without being childish
-- **Customizable**: Multiple themes, including OLED Dark mode, 11 accent colors
+- **Customizable**: Multiple themes (Light, Dark, OLED Dark, Sandstone, Ocean, Forest, Solarized) with 11 accent colors
 - **Content First**: Clean typography, generous whitespace
 - **Native Feel**: Built with SwiftUI for optimal performance
 
@@ -37,7 +32,9 @@ This project follows these design principles:
 
 | Feature | Description |
 |---------|-------------|
-| **Theme System** | Light, Dark, OLED Dark modes with 11 accent colors |
+| **Theme System** | Light, Dark, OLED Dark, Sandstone, Ocean, Forest, Solarized modes with 11 accent colors |
+| **App Lock** | Biometric (Face ID / Touch ID) + PIN protection for app data |
+| **Accessibility** | Increase Contrast toggle for improved legibility |
 | **Home Screen** | Server pills, pinned channels, recent conversations |
 | **Chat Interface** | Message bubbles, reactions, voice messages, rich attachments, replies |
 | **Navigation** | Customizable tab bar with floating compose button |
@@ -79,6 +76,7 @@ flukavike/
 │   ├── FluxerCallService.swift  # CallKit & voice calls
 │   ├── AudioRecorderService.swift # Voice message recording
 │   ├── AudioPlayerService.swift # Voice message playback
+│   ├── BiometricLockService.swift # App lock (Face ID/Touch ID + PIN)
 │   ├── PushNotificationService.swift # APNs handling
 │   └── SiriDonationService.swift # Siri intent donation
 ├── Stores/
@@ -111,9 +109,11 @@ flukavike/
 │   ├── Profile/
 │   │   └── ProfileView.swift
 │   ├── Settings/
-│   │   └── SettingsView.swift
+│   │   ├── SettingsView.swift
+│   │   └── PinSetupView.swift   # PIN enrollment/change for app lock
 │   └── Common/
 │       ├── CommonViews.swift    # Shared UI components
+│       ├── AppLockView.swift    # Biometric + PIN lock overlay
 │       ├── ContextMenus.swift   # Channel/server/DM context menus
 │       └── HCaptchaView.swift   # hCaptcha verification
 ├── Intents/
@@ -162,6 +162,10 @@ enum AppTheme: String, CaseIterable, Identifiable {
     case light = "Light"
     case dark = "Dark"
     case oled = "OLED Dark"
+    case sandstone = "Sandstone"
+    case ocean = "Ocean"
+    case forest = "Forest"
+    case solarized = "Solarized"
     case yourTheme = "Your Theme" // Add here
 }
 ```

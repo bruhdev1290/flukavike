@@ -23,11 +23,15 @@ struct FluxerApp: App {
     @State private var appState = AppState()
     @State private var presenceStore = PresenceStore.shared
     @State private var starredChannelsStore = StarredChannelsStore.shared
+    @State private var biometricLock = BiometricLockService.shared
 
     // View State
     @State private var showIncomingCall = false
     @State private var showActiveCall = false
     @State private var toastManager = ToastManager.shared
+    /// Deep link received while the app was locked; replayed after unlock so
+    /// navigation/content isn't mutated behind the lock overlay.
+    @State private var pendingDeepLink: URL?
 
     // Startup
     enum StartupState {
@@ -42,14 +46,22 @@ struct FluxerApp: App {
 
     var body: some Scene {
         WindowGroup {
-            Group {
-                switch startupState {
-                case .checking:
-                    SplashView()
-                case .needsAuth:
-                    LoginView()
-                case .authenticated:
-                    authenticatedView
+            ZStack {
+                Group {
+                    switch startupState {
+                    case .checking:
+                        SplashView()
+                    case .needsAuth:
+                        LoginView()
+                    case .authenticated:
+                        authenticatedView
+                    }
+                }
+
+                if biometricLock.isLocked {
+                    AppLockView()
+                        .transition(.opacity)
+                        .zIndex(999)
                 }
             }
             .environment(themeManager)
@@ -59,7 +71,24 @@ struct FluxerApp: App {
             .environment(apiService)
             .environment(webSocketService)
             .environment(webAuthService)
+            .environment(biometricLock)
             .preferredColorScheme(themeManager.colorScheme)
+            .onOpenURL { url in
+                // Don't route deep links while the app is locked — defer them
+                // so navigation/content isn't mutated behind the lock overlay.
+                if biometricLock.isLocked {
+                    pendingDeepLink = url
+                } else {
+                    _ = appDelegate.handleDeepLink(url: url)
+                }
+            }
+            .onChange(of: biometricLock.isLocked) { _, isLocked in
+                // Replay the deferred deep link once the app is unlocked.
+                if !isLocked, let url = pendingDeepLink {
+                    pendingDeepLink = nil
+                    _ = appDelegate.handleDeepLink(url: url)
+                }
+            }
             .onAppear {
                 initializeServices()
             }
@@ -136,6 +165,9 @@ struct FluxerApp: App {
     private func initializeServices() {
         // Configure services
         callService.configure(apiService: apiService, webSocketService: webSocketService)
+
+        // Engage app lock on launch if enabled.
+        biometricLock.lockIfNeeded()
 
         // Setup WebSocket handlers
         setupWebSocketHandlers()
@@ -414,14 +446,20 @@ struct FluxerApp: App {
             }
             // Clear badge and delivered notifications when user opens the app
             pushService.clearBadge()
-            
+
         case .background:
             // App went to background - keep WebSocket connected for push notifications
-            break
-            
+            // Engage app lock if enabled so sensitive content is hidden on return.
+            biometricLock.lockIfNeeded()
+
         case .inactive:
+            // Transient state (Control Center, Notification Center, biometric prompt).
+            // Do NOT engage the lock here: .inactive fires on every transient overlay,
+            // not just the app switcher, and presenting the Face ID prompt itself
+            // transitions the scene to .inactive (which would re-lock + re-prompt).
+            // The lock is engaged on .background and on launch instead.
             break
-            
+
         @unknown default:
             break
         }
@@ -471,14 +509,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     }
     
     // MARK: - URL Handling (Deep Links)
-    
-    func application(
-        _ app: UIApplication,
-        open url: URL,
-        options: [UIApplication.OpenURLOptionsKey : Any] = [:]
-    ) -> Bool {
-        return handleDeepLink(url: url)
-    }
+    // Deep links are handled via SwiftUI `.onOpenURL` on the root view, which
+    // routes to `handleDeepLink(url:)`. This avoids the deprecated
+    // `UIApplication.OpenURLOptionsKey` API.
     
     // MARK: - User Activity (Siri/Handoff)
     
@@ -559,7 +592,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
     }
     
-    private func handleDeepLink(url: URL) -> Bool {
+    func handleDeepLink(url: URL) -> Bool {
         guard url.scheme == "fluxer" || url.scheme == "flukavike" else { return false }
 
         let pathComponents = url.pathComponents.filter { $0 != "/" }

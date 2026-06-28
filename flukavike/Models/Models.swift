@@ -84,9 +84,12 @@ struct User: Identifiable, Codable, Equatable {
         customStatus = try c.decodeIfPresent(String.self, forKey: .customStatus)
 
         // status and createdAt are not part of the Fluxer user REST response;
-        // default to sensible values so decoding never fails.
+        // default to sensible values so decoding never fails. For createdAt,
+        // derive the join date from the snowflake ID when the API omits it.
         status    = (try c.decodeIfPresent(UserStatus.self, forKey: .status)) ?? .offline
-        createdAt = (try c.decodeIfPresent(Date.self,       forKey: .createdAt)) ?? Date()
+        createdAt = (try c.decodeIfPresent(Date.self,       forKey: .createdAt))
+            ?? Snowflake.creationDate(from: id)
+            ?? Date()
     }
 
     func encode(to encoder: Encoder) throws {
@@ -115,6 +118,22 @@ struct User: Identifiable, Codable, Equatable {
         bot: false,
         createdAt: Date()
     )
+}
+
+// MARK: - Snowflake Timestamp Helper
+enum Snowflake {
+    // Discord-style snowflakes encode milliseconds since 2015-01-01T00:00:00Z
+    // in the top 22 bits of a 64-bit integer.
+    private static let discordEpochMs: Int64 = 1_420_070_400_000
+
+    /// Returns the creation date encoded in a Discord/Fluxer snowflake ID, or nil
+    /// if the ID is not a valid numeric snowflake.
+    static func creationDate(from id: String) -> Date? {
+        guard let snowflake = Int64(id), snowflake > 0 else { return nil }
+        let timestampMs = snowflake >> 22
+        guard timestampMs > 0 else { return nil }
+        return Date(timeIntervalSince1970: TimeInterval(discordEpochMs + timestampMs) / 1000)
+    }
 }
 
 enum UserStatus: String, Codable, CaseIterable {

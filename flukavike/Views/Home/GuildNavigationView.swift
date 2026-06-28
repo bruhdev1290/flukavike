@@ -18,6 +18,7 @@ struct GuildNavigationView: View {
     @State private var selectedChannel: Channel?
     @State private var contextMenuChannel: Channel? = nil
     @State private var showMessages: Bool = false
+    @State private var menuServer: Server?
 
     private let apiService = APIService.shared
 
@@ -98,6 +99,11 @@ struct GuildNavigationView: View {
         }
         .sheet(item: $contextMenuChannel) { channel in
             ChannelContextMenu(channel: channel, server: selectedServer)
+                .environment(themeManager)
+                .environment(appState)
+        }
+        .sheet(item: $menuServer) { server in
+            ServerContextMenu(server: server)
                 .environment(themeManager)
                 .environment(appState)
         }
@@ -355,9 +361,21 @@ struct GuildNavigationView: View {
 
                 HStack {
                     Spacer()
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(themeManager.textTertiary(colorScheme))
+                    // Chevron opens the server menu (manage / leave).
+                    Button {
+                        if let server = selectedServer {
+                            menuServer = server
+                            HapticFeedback.medium()
+                        }
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(themeManager.textTertiary(colorScheme))
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("Server menu")
+                    .disabled(selectedServer == nil)
                 }
             }
             .padding(12)
@@ -373,6 +391,8 @@ struct GuildNavigationView: View {
             )
         }
         .frame(height: selectedServer?.bannerUrl != nil ? 120 : 80)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: selectedServer?.bannerUrl != nil)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: selectedServer?.id)
     }
 
     // MARK: - Data Loading

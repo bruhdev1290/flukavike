@@ -16,6 +16,10 @@ class ThemeManager {
     var accentColor: AccentColor = .indigo {
         didSet { UserDefaults.standard.set(accentColor.rawValue, forKey: "accentColor") }
     }
+    /// Boosts text/separator contrast for improved legibility (Accessibility).
+    var increaseContrast: Bool = false {
+        didSet { UserDefaults.standard.set(increaseContrast, forKey: "increaseContrast") }
+    }
 
     init() {
         if let saved = UserDefaults.standard.string(forKey: "theme"),
@@ -26,14 +30,21 @@ class ThemeManager {
            let accent = AccentColor(rawValue: saved) {
             accentColor = accent
         }
+        if UserDefaults.standard.object(forKey: "increaseContrast") != nil {
+            increaseContrast = UserDefaults.standard.bool(forKey: "increaseContrast")
+        }
     }
-    
+
     enum AppTheme: String, CaseIterable, Identifiable {
         case system = "System"
         case light = "Light"
         case dark = "Dark"
         case oled = "OLED Dark"
-        
+        case sandstone = "Sandstone"
+        case ocean = "Ocean"
+        case forest = "Forest"
+        case solarized = "Solarized"
+
         var id: String { rawValue }
     }
     
@@ -77,12 +88,13 @@ class ThemeManager {
         switch currentTheme {
         case .system: return nil
         case .light: return .light
-        case .dark, .oled: return .dark
+        case .dark, .oled, .ocean, .forest: return .dark
+        case .sandstone, .solarized: return .light
         }
     }
-    
+
     // MARK: - Dynamic Colors (Discord-style)
-    
+
     // Main background - very dark gray/almost black
     func backgroundPrimary(_ colorScheme: ColorScheme) -> Color {
         switch currentTheme {
@@ -90,11 +102,19 @@ class ThemeManager {
             return .black
         case .dark:
             return Color(red: 0.06, green: 0.06, blue: 0.07) // #0F0F10
+        case .ocean:
+            return Color(red: 0.04, green: 0.06, blue: 0.12) // deep navy
+        case .forest:
+            return Color(red: 0.05, green: 0.08, blue: 0.05) // deep green-black
+        case .sandstone:
+            return Color(red: 0.93, green: 0.88, blue: 0.78) // warm sandy beige
+        case .solarized:
+            return Color(red: 0.99, green: 0.96, blue: 0.89) // #FDF6E3 base3
         case .system, .light:
             return colorScheme == .dark ? Color(red: 0.06, green: 0.06, blue: 0.07) : .white
         }
     }
-    
+
     // Secondary background - slightly lighter
     func backgroundSecondary(_ colorScheme: ColorScheme) -> Color {
         switch currentTheme {
@@ -102,11 +122,19 @@ class ThemeManager {
             return Color(white: 0.04)
         case .dark:
             return Color(red: 0.11, green: 0.11, blue: 0.12) // #1C1C1F
+        case .ocean:
+            return Color(red: 0.07, green: 0.10, blue: 0.18)
+        case .forest:
+            return Color(red: 0.08, green: 0.12, blue: 0.07)
+        case .sandstone:
+            return Color(red: 0.88, green: 0.82, blue: 0.70)
+        case .solarized:
+            return Color(red: 0.97, green: 0.94, blue: 0.86) // #EEE8D5 base2
         case .system, .light:
             return colorScheme == .dark ? Color(red: 0.11, green: 0.11, blue: 0.12) : Color(red: 0.95, green: 0.95, blue: 0.97)
         }
     }
-    
+
     // Tertiary background - input fields, etc
     func backgroundTertiary(_ colorScheme: ColorScheme) -> Color {
         switch currentTheme {
@@ -114,29 +142,56 @@ class ThemeManager {
             return Color(white: 0.08)
         case .dark:
             return Color(red: 0.18, green: 0.18, blue: 0.19) // #2D2D30
+        case .ocean:
+            return Color(red: 0.10, green: 0.14, blue: 0.24)
+        case .forest:
+            return Color(red: 0.12, green: 0.17, blue: 0.10)
+        case .sandstone:
+            return Color(red: 0.82, green: 0.75, blue: 0.62)
+        case .solarized:
+            return Color(red: 0.93, green: 0.90, blue: 0.83) // #EEE8D5-ish darker
         case .system, .light:
             return colorScheme == .dark ? Color(red: 0.18, green: 0.18, blue: 0.19) : Color(red: 0.9, green: 0.9, blue: 0.92)
         }
     }
-    
+
     // Primary text - white in dark mode
     func textPrimary(_ colorScheme: ColorScheme) -> Color {
-        colorScheme == .dark ? .white : .black
+        switch currentTheme {
+        case .solarized:
+            return Color(red: 0.40, green: 0.48, blue: 0.47) // #586E75 base01
+        default:
+            return colorScheme == .dark ? .white : .black
+        }
     }
-    
+
     // Secondary text - gray
     func textSecondary(_ colorScheme: ColorScheme) -> Color {
-        colorScheme == .dark ? Color(white: 0.71) : Color(white: 0.42)
+        if increaseContrast {
+            return colorScheme == .dark ? Color(white: 0.88) : Color(white: 0.30)
+        }
+        switch currentTheme {
+        case .solarized:
+            return Color(red: 0.55, green: 0.63, blue: 0.62) // #657B83 base00
+        default:
+            return colorScheme == .dark ? Color(white: 0.71) : Color(white: 0.42)
+        }
     }
-    
+
     // Tertiary text - darker gray
     func textTertiary(_ colorScheme: ColorScheme) -> Color {
-        colorScheme == .dark ? Color(white: 0.6) : Color(white: 0.5)
+        if increaseContrast {
+            return colorScheme == .dark ? Color(white: 0.80) : Color(white: 0.38)
+        }
+        return colorScheme == .dark ? Color(white: 0.6) : Color(white: 0.5)
     }
-    
+
     // Separator/divider
     func separator(_ colorScheme: ColorScheme) -> Color {
-        colorScheme == .dark ? Color(white: 0.15) : Color(white: 0.9)
+        if increaseContrast {
+            return colorScheme == .dark ? Color(white: 0.28) : Color(white: 0.78)
+        }
+        return colorScheme == .dark ? Color(white: 0.15) : Color(white: 0.9)
     }
 }
 

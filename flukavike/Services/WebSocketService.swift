@@ -533,7 +533,10 @@ extension WebSocketService: URLSessionWebSocketDelegate {
         // Connection opened, wait for Hello
     }
     
-    func urlSession(
+    // Marked private so it no longer "nearly matches" the optional
+    // URLSessionTaskDelegate requirement (which expects URLSessionTask, not
+    // URLSessionWebSocketTask). Called internally by the URL session.
+    private func urlSession(
         _ session: URLSession,
         task: URLSessionWebSocketTask,
         didCompleteWithError error: Error?

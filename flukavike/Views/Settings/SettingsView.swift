@@ -6,8 +6,12 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(ThemeManager.self) private var themeManager
+    @Environment(BiometricLockService.self) private var biometricLock
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
+
+    @State private var showPinSetup = false
+    @State private var pinSetupMode: PinSetupView.Mode = .enroll
 
     private var appVersion: String {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
@@ -17,8 +21,35 @@ struct SettingsView: View {
 
     private func signOut() {
         Task {
-            await WebAuthService.shared.logout()
+            WebAuthService.shared.logout()
             WebSocketService.shared.disconnect()
+        }
+    }
+
+    private func enableAppLock(_ enable: Bool) {
+        if enable {
+            // Don't persist isLockEnabled yet — wait until a PIN is actually set.
+            // The PinSetupView onComplete callback (and confirmPinSuccess) flips
+            // it on after setPin succeeds; if the sheet is cancelled without a
+            // PIN, handlePinSetupDismiss rolls it back so we never leave the
+            // lock enabled with no unlock path.
+            if !biometricLock.hasPinSet {
+                pinSetupMode = .enroll
+                showPinSetup = true
+            } else {
+                biometricLock.isLockEnabled = true
+            }
+        } else {
+            biometricLock.disable()
+        }
+    }
+
+    /// Called when the PIN setup sheet dismisses. If no PIN was set (user
+    /// cancelled enrollment), roll back isLockEnabled so the toggle doesn't
+    /// read "on" with no usable verifier.
+    private func handlePinSetupDismiss() {
+        if biometricLock.isLockEnabled && !biometricLock.hasPinSet {
+            biometricLock.isLockEnabled = false
         }
     }
 
@@ -29,14 +60,7 @@ struct SettingsView: View {
                 if let user = WebAuthService.shared.currentUser {
                     Section {
                         HStack(spacing: 14) {
-                            ZStack {
-                                Circle()
-                                    .fill(themeManager.accentColor.color.opacity(0.2))
-                                    .frame(width: 52, height: 52)
-                                Text(String(user.username.prefix(1).uppercased()))
-                                    .font(.system(size: 22, weight: .bold))
-                                    .foregroundStyle(themeManager.accentColor.color)
-                            }
+                            AvatarView(user: user, size: 52, showStatus: false)
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(user.displayName ?? user.username)
                                     .font(.system(size: 17, weight: .semibold))
@@ -113,6 +137,75 @@ struct SettingsView: View {
                     .listRowBackground(themeManager.backgroundPrimary(colorScheme))
                 }
 
+                // MARK: Privacy
+                Section {
+                    Toggle(isOn: Binding(
+                        get: { biometricLock.isLockEnabled },
+                        set: { enableAppLock($0) }
+                    )) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "lock.fill")
+                                .font(.system(size: 18))
+                                .foregroundStyle(themeManager.accentColor.color)
+                                .frame(width: 28, height: 28)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("App Lock")
+                                    .font(.system(size: 17))
+                                    .foregroundStyle(themeManager.textPrimary(colorScheme))
+                                Text("Require Face ID / Touch ID or a PIN to open the app")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(themeManager.textSecondary(colorScheme))
+                            }
+                        }
+                    }
+                    .tint(themeManager.accentColor.color)
+                    .listRowBackground(themeManager.backgroundPrimary(colorScheme))
+
+                    if biometricLock.isLockEnabled {
+                        if biometricLock.canUseBiometrics {
+                            Toggle(isOn: Binding(
+                                get: { biometricLock.isBiometricEnabled },
+                                set: { biometricLock.isBiometricEnabled = $0 }
+                            )) {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "faceid")
+                                        .font(.system(size: 18))
+                                        .foregroundStyle(themeManager.accentColor.color)
+                                        .frame(width: 28, height: 28)
+                                    Text("Use Face ID / Touch ID")
+                                        .font(.system(size: 17))
+                                        .foregroundStyle(themeManager.textPrimary(colorScheme))
+                                }
+                            }
+                            .tint(themeManager.accentColor.color)
+                            .listRowBackground(themeManager.backgroundPrimary(colorScheme))
+                        }
+
+                        Button {
+                            pinSetupMode = .change
+                            showPinSetup = true
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "key.fill")
+                                    .font(.system(size: 18))
+                                    .foregroundStyle(themeManager.accentColor.color)
+                                    .frame(width: 28, height: 28)
+                                Text(biometricLock.hasPinSet ? "Change PIN" : "Set PIN")
+                                    .font(.system(size: 17))
+                                    .foregroundStyle(themeManager.textPrimary(colorScheme))
+                                Spacer()
+                            }
+                        }
+                        .listRowBackground(themeManager.backgroundPrimary(colorScheme))
+                    }
+                } header: {
+                    Text("Privacy")
+                } footer: {
+                    Text("When enabled, the app locks when you leave it. A PIN protects your data if biometrics are unavailable.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(themeManager.textTertiary(colorScheme))
+                }
+
                 // MARK: Support
                 Section("Support") {
                     NavigationLink(destination: ContactSupportView()) {
@@ -185,6 +278,14 @@ struct SettingsView: View {
                         .foregroundStyle(themeManager.accentColor.color)
                 }
             }
+            .sheet(isPresented: $showPinSetup,
+                   onDismiss: { handlePinSetupDismiss() }) {
+                PinSetupView(mode: pinSetupMode) {
+                    biometricLock.isLockEnabled = true
+                }
+                .environment(biometricLock)
+                .environment(themeManager)
+            }
         }
     }
 }
@@ -239,8 +340,8 @@ struct AppearanceSettingsView: View {
 
     private var cs: ColorScheme {
         switch themeManager.currentTheme {
-        case .dark, .oled: return .dark
-        case .light: return .light
+        case .dark, .oled, .ocean, .forest: return .dark
+        case .light, .sandstone, .solarized: return .light
         case .system: return systemColorScheme
         }
     }
@@ -293,6 +394,25 @@ struct AppearanceSettingsView: View {
                 .listRowBackground(themeManager.backgroundPrimary(cs))
             }
 
+            Section {
+                Toggle(isOn: Binding(
+                    get: { themeManager.increaseContrast },
+                    set: { themeManager.increaseContrast = $0 }
+                )) {
+                    Text("Increase Contrast")
+                        .font(.system(size: 17))
+                        .foregroundStyle(themeManager.textPrimary(cs))
+                }
+                .tint(themeManager.accentColor.color)
+                .listRowBackground(themeManager.backgroundPrimary(cs))
+            } header: {
+                Text("Accessibility")
+            } footer: {
+                Text("Boosts text and separator contrast for improved legibility.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(themeManager.textTertiary(cs))
+            }
+
             Section("Preview") {
                 VStack(spacing: 12) {
                     HStack {
@@ -309,12 +429,17 @@ struct AppearanceSettingsView: View {
                                     .foregroundStyle(.white)
                             )
                     }
-                    Text("This is how your interface will look with the selected theme and accent color.")
+                    Text("This is how your interface will look with \(themeManager.currentTheme.rawValue) and \(themeManager.accentColor.rawValue).")
                         .font(.system(size: 15))
                         .foregroundStyle(themeManager.textSecondary(cs))
                 }
                 .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(themeManager.backgroundTertiary(cs))
+                .cornerRadius(10)
                 .listRowBackground(themeManager.backgroundPrimary(cs))
+                .listRowInsets(EdgeInsets())
+                .padding(.horizontal, 6)
             }
         }
         .listStyle(.insetGrouped)

@@ -56,6 +56,10 @@
     <!-- Camera - Required for video calls and taking photos -->
     <key>NSCameraUsageDescription</key>
     <string>Flukavike needs camera access for video calls and to take photos for sharing.</string>
+
+    <!-- Face ID - Required for the app lock feature -->
+    <key>NSFaceIDUsageDescription</key>
+    <string>Face ID is used to unlock Flukavike and protect your messages.</string>
     
     <!-- Photo Library - Required for sharing images/videos -->
     <key>NSPhotoLibraryUsageDescription</key>
