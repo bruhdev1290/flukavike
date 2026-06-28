@@ -1024,7 +1024,14 @@ class APIService {
         let data = try await makeRequest(endpoint: "/channels/\(id)")
         return try JSONDecoder.flukavike.decode(Channel.self, from: data)
     }
-    
+
+    func deleteChannel(channelId: String) async throws {
+        _ = try await makeRequest(
+            endpoint: "/channels/\(channelId)",
+            method: "DELETE"
+        )
+    }
+
     func getMessages(channelId: String, before: String? = nil, limit: Int = 50) async throws -> [Message] {
         var endpoint = "/channels/\(channelId)/messages?limit=\(limit)"
         if let before = before {
@@ -1060,9 +1067,9 @@ class APIService {
             parse.append("everyone")
         }
 
-        let userIDs = matches(for: #"<@!?(\d+)>"#, in: content)
-        let roleIDs = matches(for: #"<@&(\d+)>"#, in: content)
-        let channelIDs = matches(for: #"<#(\d+)>"#, in: content)
+        let userIDs = matches(for: #"<@!?([A-Za-z0-9_-]+)>"#, in: content)
+        let roleIDs = matches(for: #"<@&([A-Za-z0-9_-]+)>"#, in: content)
+        let channelIDs = matches(for: #"<#([A-Za-z0-9_-]+)>"#, in: content)
 
         return [
             "parse": parse,
@@ -1245,8 +1252,17 @@ class APIService {
         return try JSONDecoder.flukavike.decode(VoiceTokenResponse.self, from: data)
     }
     
+    // MARK: - Typing
+
+    func sendTyping(channelId: String) async throws {
+        _ = try await makeRequest(
+            endpoint: "/channels/\(channelId)/typing",
+            method: "POST"
+        )
+    }
+
     // MARK: - Notification Endpoints
-    
+
     func registerDeviceToken(token: String, platform: String = "ios") async throws {
         let body: [String: Any] = [
             "token": token,
@@ -1267,7 +1283,33 @@ class APIService {
             method: "POST"
         )
     }
-    
+
+    func getNotifications() async throws -> [AppNotification] {
+        let data = try await makeRequest(endpoint: "/users/@me/notifications")
+        return try JSONDecoder.flukavike.decode([AppNotification].self, from: data)
+    }
+
+    func markNotificationRead(id: String) async throws {
+        _ = try await makeRequest(
+            endpoint: "/users/@me/notifications/\(id)/read",
+            method: "POST"
+        )
+    }
+
+    func markAllNotificationsRead() async throws {
+        _ = try await makeRequest(
+            endpoint: "/users/@me/notifications/read",
+            method: "POST"
+        )
+    }
+
+    func dismissNotification(id: String) async throws {
+        _ = try await makeRequest(
+            endpoint: "/users/@me/notifications/\(id)",
+            method: "DELETE"
+        )
+    }
+
     // MARK: - Message Editing
     
     func editMessage(channelId: String, messageId: String, content: String) async throws -> Message {

@@ -147,15 +147,46 @@ class AppState {
     var selectedServer: Server?
     var selectedChannel: Channel?
     var isShowingSettings: Bool = false
+    var isQuickSwitcherPresented: Bool = false
     var notifications: [AppNotification] = []
     var unreadNotifications: Int = 0
     var unreadMessages: Int = 0
     /// Set by the push/deep-link handler to trigger navigation to a specific channel.
     var pendingChannelNavigation: ChannelNavigation? = nil
+    /// Set by deep-link / Siri handlers to trigger navigation to a specific DM.
+    var pendingDMNavigation: DMNavigation? = nil
 
     struct ChannelNavigation: Equatable {
         let serverId: String
         let channelId: String
+    }
+
+    struct DMNavigation: Equatable {
+        let channelId: String
+        let userId: String?
+    }
+
+    // MARK: - DM List
+    var dmChannels: [DMChannelResponse] = []
+
+    func upsertDM(_ channel: DMChannelResponse) {
+        if let index = dmChannels.firstIndex(where: { $0.id == channel.id }) {
+            dmChannels[index] = channel
+        } else {
+            dmChannels.insert(channel, at: 0)
+        }
+    }
+
+    func removeDM(id: String) {
+        dmChannels.removeAll { $0.id == id }
+    }
+
+    func dmChannel(for id: String) -> DMChannelResponse? {
+        dmChannels.first { $0.id == id }
+    }
+
+    func dmChannel(withRecipient userId: String) -> DMChannelResponse? {
+        dmChannels.first { $0.recipients.contains { $0.id == userId } }
     }
     var connectionStatus: ConnectionStatus = .disconnected
     // ⚠️ WARNING — DO NOT REMOVE OR RENAME THIS PROPERTY.

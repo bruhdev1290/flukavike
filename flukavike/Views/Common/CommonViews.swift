@@ -13,36 +13,34 @@ struct AvatarView: View {
 
     @Environment(ThemeManager.self) private var themeManager
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(PresenceStore.self) private var presenceStore
 
     private var resolvedURL: URL? {
         APIService.shared.avatarURL(userId: user.id, hash: user.avatarUrl)
             ?? APIService.shared.defaultAvatarURL(userId: user.id)
     }
 
+    private var effectiveStatus: UserStatus {
+        presenceStore.presence(for: user.id)?.status ?? user.status
+    }
+
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            if let url = resolvedURL {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().scaledToFill()
-                            .frame(width: size, height: size)
-                            .clipShape(Circle())
-                    default:
-                        placeholder
-                    }
-                }
-            } else {
+            CachedAsyncImage(url: resolvedURL) { image in
+                image.resizable().scaledToFill()
+            } placeholder: {
                 placeholder
             }
+            .frame(width: size, height: size)
+            .clipShape(Circle())
 
             if showStatus {
                 Circle()
-                    .fill(user.status.color)
+                    .fill(effectiveStatus.color)
                     .frame(width: size * 0.3, height: size * 0.3)
                     .overlay(Circle().stroke(themeManager.backgroundPrimary(colorScheme), lineWidth: 2))
                     .offset(x: 2, y: 2)
-                    .accessibilityLabel("Status: \(user.status.accessibilityLabel)")
+                    .accessibilityLabel("Status: \(effectiveStatus.accessibilityLabel)")
             }
         }
         .frame(width: size, height: size)
@@ -54,8 +52,8 @@ struct AvatarView: View {
         ZStack {
             Circle()
                 .fill(LinearGradient(
-                    colors: [themeManager.accentColor.color.opacity(0.7),
-                             themeManager.accentColor.color.opacity(0.3)],
+                    colors: [placeholderColor.opacity(0.7),
+                             placeholderColor.opacity(0.3)],
                     startPoint: .topLeading, endPoint: .bottomTrailing
                 ))
             Text(user.formattedName.prefix(1).uppercased())
@@ -64,6 +62,21 @@ struct AvatarView: View {
         }
         .clipShape(Circle())
         .frame(width: size, height: size)
+    }
+
+    private var placeholderColor: Color {
+        AvatarPlaceholderPalette.color(for: user.id)
+    }
+}
+
+private enum AvatarPlaceholderPalette {
+    static let colors: [Color] = [
+        .red, .orange, .yellow, .green, .mint, .teal, .blue, .indigo, .purple, .pink
+    ]
+
+    static func color(for identifier: String) -> Color {
+        let hash = identifier.unicodeScalars.reduce(0) { $0 + Int($1.value) }
+        return colors[abs(hash) % colors.count]
     }
 }
 
@@ -81,23 +94,13 @@ struct ServerIconView: View {
     }
 
     var body: some View {
-        Group {
-            if let url = resolvedURL {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().scaledToFill()
-                            .frame(width: size, height: size)
-                            .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-                    default:
-                        placeholder
-                    }
-                }
-            } else {
-                placeholder
-            }
+        CachedAsyncImage(url: resolvedURL) { image in
+            image.resizable().scaledToFill()
+        } placeholder: {
+            placeholder
         }
         .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
     }
 
     private var placeholder: some View {
@@ -416,4 +419,5 @@ struct SectionHeader: View {
     }
     .padding()
     .environment(ThemeManager())
+    .environment(PresenceStore.shared)
 }

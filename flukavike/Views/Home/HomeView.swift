@@ -504,9 +504,14 @@ struct AddServerPill: View {
 struct HomeChannelRow: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(StarredChannelsStore.self) private var starredStore
     let channel: Channel
     let isSelected: Bool
-    
+
+    private var isStarred: Bool {
+        starredStore.isStarred(channel.id)
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             // Channel Icon
@@ -515,16 +520,23 @@ struct HomeChannelRow: View {
                 .foregroundStyle(isSelected ? themeManager.accentColor.color : themeManager.textSecondary(colorScheme))
                 .frame(width: 24)
                 .accessibilityHidden(true)
-            
+
             // Channel Name
             Text(channel.name)
-                .font(.system(size: 16, weight: channel.hasUnread ? .semibold : .regular))
+                .font(.system(size: 16, weight: channel.hasUnread || isStarred ? .semibold : .regular))
                 .foregroundStyle(isSelected ? themeManager.accentColor.color : themeManager.textPrimary(colorScheme))
-            
+
             Spacer()
-            
-            // Unread/Mention Indicators
+
+            // Star / Unread / Mention Indicators
             HStack(spacing: 8) {
+                if isStarred {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.yellow)
+                        .accessibilityLabel("Starred channel")
+                }
+
                 if channel.hasMention {
                     MentionBadge(count: channel.mentionCount)
                 } else if channel.hasUnread {
@@ -533,7 +545,6 @@ struct HomeChannelRow: View {
                         .frame(width: 8, height: 8)
                         .accessibilityLabel("Unread messages")
                 }
-                
             }
         }
         .padding(.vertical, 10)

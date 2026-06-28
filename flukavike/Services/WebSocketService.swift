@@ -35,6 +35,8 @@ class WebSocketService: NSObject {
     var onMessageDelete: ((String) -> Void)?
     var onTypingStart: ((TypingEvent) -> Void)?
     var onPresenceUpdate: ((PresenceUpdate) -> Void)?
+    var onDMChannelCreate: ((DMChannelResponse) -> Void)?
+    var onDMChannelDelete: ((String) -> Void)?
     var onCallCreate: ((FlukavikeCall) -> Void)?
     var onCallUpdate: ((FlukavikeCall) -> Void)?
     var onCallDelete: ((String) -> Void)?
@@ -222,7 +224,24 @@ class WebSocketService: NSObject {
                     self?.onPresenceUpdate?(update)
                 }
             }
-            
+
+        case "CHANNEL_CREATE":
+            if let channel = try? decode(DMChannelResponse.self, from: eventData),
+               !channel.recipients.isEmpty {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onDMChannelCreate?(channel)
+                }
+            }
+
+        case "CHANNEL_DELETE":
+            if let channel = try? decode(DMChannelResponse.self, from: eventData),
+               !channel.recipients.isEmpty,
+               let id = channel.id as String? {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onDMChannelDelete?(id)
+                }
+            }
+
         case "CALL_CREATE":
             if let call = try? decode(FlukavikeCall.self, from: eventData) {
                 DispatchQueue.main.async { [weak self] in
@@ -393,17 +412,6 @@ class WebSocketService: NSObject {
         sendJSON(heartbeat)
     }
     
-    func sendTyping(channelId: String) {
-        let typing: [String: Any] = [
-            "op": 4,
-            "d": [
-                "channel_id": channelId
-            ]
-        ]
-        
-        sendJSON(typing)
-    }
-    
     func updatePresence(status: UserStatus, customStatus: String?) {
         let presence: [String: Any] = [
             "op": 3,
@@ -566,8 +574,20 @@ struct TypingEvent: Codable {
     let timestamp: Int
 }
 
+struct PresenceUser: Codable {
+    let id: String
+    let username: String?
+    let avatar: String?
+    let globalName: String?
+    
+    private enum CodingKeys: String, CodingKey {
+        case id, username, avatar
+        case globalName = "global_name"
+    }
+}
+
 struct PresenceUpdate: Codable {
-    let user: User
+    let user: PresenceUser
     let status: String
     let customStatus: String?
     let clientStatus: ClientStatus?

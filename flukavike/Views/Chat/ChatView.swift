@@ -22,6 +22,7 @@ struct ChatView: View {
     @State private var isSending: Bool = false
     @State private var errorMessage: String?
     @State private var typingUsers: [String: Date] = [:]
+    @State private var typingProfiles: [String: User] = [:]
     @State private var isRecordingVoice: Bool = false
     @State private var voiceRecording: VoiceMessageRecording?
     @FocusState private var isInputFocused: Bool
@@ -47,8 +48,10 @@ struct ChatView: View {
     // Message context menu
     @State private var selectedMessageForMenu: Message? = nil
 
-    // Starred state (backed by StarredChannelsManager)
-    @State private var isPinned: Bool = false
+    // Starred state (backed by StarredChannelsStore)
+    private var isPinned: Bool {
+        StarredChannelsStore.shared.isStarred(channel.id)
+    }
 
     /// Server name resolved via REST servers (proper names) then gateway guilds as fallback.
     private var resolvedServerName: String {
@@ -142,6 +145,7 @@ struct ChatView: View {
                     loadMessages()
                     setupWebSocketHandlers()
                     scrollToBottom(proxy: proxy)
+                    markChannelReadIfNeeded()
                 }
                 .onDisappear {
                     removeWebSocketHandlers()
@@ -155,6 +159,9 @@ struct ChatView: View {
                 }
                 .onChange(of: messages.count) { _, _ in
                     scrollToBottom(proxy: proxy)
+                }
+                .onChange(of: typingUsers) { _, _ in
+                    resolveTypingProfiles()
                 }
             }
             
@@ -220,7 +227,8 @@ struct ChatView: View {
                 onTyping: sendTypingIndicator,
                 onVoiceRecording: handleVoiceRecording,
                 onVoiceRecordingCancelled: cancelVoiceRecording,
-                onAttachPhoto: { showPhotoPicker = true }
+                onAttachPhoto: { showPhotoPicker = true },
+                onAttachGIF: sendGIF
             )
             .focused($isInputFocused)
             
@@ -236,7 +244,6 @@ struct ChatView: View {
         .background(themeManager.backgroundPrimary(colorScheme))
         .navigationTitle("#\(channel.name)")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { isPinned = StarredChannelsManager.shared.isStarred(channel.id) }
         .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhotoItem, matching: .any(of: [.images, .videos]))
         .onChange(of: selectedPhotoItem) { _, item in
             guard let item else { return }
@@ -269,7 +276,7 @@ struct ChatView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 16) {
                     Button(action: {
-                        isPinned = StarredChannelsManager.shared.toggle(channelId: channel.id, serverName: resolvedServerName)
+                        _ = StarredChannelsStore.shared.toggle(channel: channel, serverName: resolvedServerName)
                         HapticFeedback.light()
                     }) {
                         Image(systemName: isPinned ? "star.fill" : "star")
@@ -293,7 +300,8 @@ struct ChatView: View {
         let threshold: TimeInterval = 10
         return typingUsers
             .filter { $0.value.addingTimeInterval(threshold) > now }
-            .compactMap { _ in User.preview }
+            .compactMap { typingProfiles[$0.key] }
+            .filter { $0.id != appState.currentUser?.id }
     }
     
     // MARK: - Messages
@@ -330,6 +338,34 @@ struct ChatView: View {
         }
     }
     
+    private func sendGIF(_ data: Data) {
+        guard !data.isEmpty else { return }
+        let previousText = messageText
+        messageText = ""
+        isSending = true
+        Task {
+            do {
+                let msg = try await apiService.sendMessageWithAttachment(
+                    channelId: channel.id,
+                    content: previousText,
+                    imageData: data,
+                    filename: "animation.gif",
+                    mimeType: "image/gif"
+                )
+                await MainActor.run {
+                    isSending = false
+                    messages.append(msg)
+                }
+            } catch {
+                await MainActor.run {
+                    isSending = false
+                    messageText = previousText
+                    errorMessage = "Failed to send GIF: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
     private func sendMessage() {
         // If we're editing, save the edit instead
         if editingMessage != nil {
@@ -486,7 +522,44 @@ struct ChatView: View {
     }
     
     private func sendTypingIndicator() {
-        webSocketService.sendTyping(channelId: channel.id)
+        Task {
+            try? await apiService.sendTyping(channelId: channel.id)
+        }
+    }
+
+    private func markChannelReadIfNeeded() {
+        guard let lastMessage = messages.last else { return }
+        Task {
+            try? await apiService.markChannelRead(channelId: channel.id, messageId: lastMessage.id)
+            await MainActor.run {
+                appState.notifications.removeAll {
+                    $0.channelId == channel.id && !$0.read
+                }
+                appState.unreadNotifications = appState.notifications.filter { !$0.read }.count
+            }
+        }
+    }
+
+    private func resolveTypingProfiles() {
+        Task {
+            var profiles: [String: User] = [:]
+            await withTaskGroup(of: (String, User?).self) { group in
+                for userId in typingUsers.keys {
+                    group.addTask {
+                        if let user = await UserCache.shared.user(withId: userId) {
+                            return (userId, user)
+                        }
+                        return (userId, nil)
+                    }
+                }
+                for await (userId, user) in group {
+                    if let user { profiles[userId] = user }
+                }
+            }
+            await MainActor.run {
+                typingProfiles.merge(profiles) { _, new in new }
+            }
+        }
     }
     
     // MARK: - Voice Messages
@@ -864,9 +937,9 @@ struct MessageContentView: View {
 
     private var segments: [Segment] {
         let patterns: [(kind: (String) -> MentionKind?, regex: NSRegularExpression)] = [
-            ({ .user(id: $0) }, try! NSRegularExpression(pattern: "<@!?(\\d+)>", options: [])),
-            ({ .channel(id: $0) }, try! NSRegularExpression(pattern: "<#(\\d+)>", options: [])),
-            ({ .role(id: $0) }, try! NSRegularExpression(pattern: "<@&(\\d+)>", options: [])),
+            ({ .user(id: $0) }, try! NSRegularExpression(pattern: "<@!?([A-Za-z0-9_-]+)>", options: [])),
+            ({ .channel(id: $0) }, try! NSRegularExpression(pattern: "<#([A-Za-z0-9_-]+)>", options: [])),
+            ({ .role(id: $0) }, try! NSRegularExpression(pattern: "<@&([A-Za-z0-9_-]+)>", options: [])),
             ({ _ in .everyone }, try! NSRegularExpression(pattern: "@everyone", options: [])),
             ({ _ in .here }, try! NSRegularExpression(pattern: "@here", options: [])),
         ]
@@ -1209,8 +1282,10 @@ struct DiscordInputView: View {
     var onVoiceRecording: (Bool) -> Void
     var onVoiceRecordingCancelled: () -> Void
     var onAttachPhoto: () -> Void = {}
+    var onAttachGIF: (Data) -> Void = { _ in }
 
     @State private var showEmojiPicker: Bool = false
+    @State private var showGIFPicker: Bool = false
     @State private var lastTypingSent: Date = .distantPast
 
     // Mention autocomplete state
@@ -1242,6 +1317,25 @@ struct DiscordInputView: View {
                         .foregroundStyle(themeManager.accentColor.color)
                 }
                 .accessibilityLabel("Add attachment")
+
+                // GIF Button
+                Button(action: { showGIFPicker = true }) {
+                    Text("GIF")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(themeManager.accentColor.color)
+                        .frame(width: 32, height: 24)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(themeManager.accentColor.color, lineWidth: 1.5)
+                        )
+                }
+                .accessibilityLabel("Add GIF")
+                .sheet(isPresented: $showGIFPicker) {
+                    GIFDocumentPicker { data in
+                        showGIFPicker = false
+                        onAttachGIF(data)
+                    }
+                }
 
                 // Text Field Container
                 HStack(spacing: 8) {
@@ -1964,4 +2058,5 @@ extension Data {
     }
     .environment(ThemeManager())
     .environment(AppState())
+    .environment(PresenceStore.shared)
 }

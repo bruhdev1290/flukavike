@@ -53,16 +53,17 @@ struct ChannelContextMenu: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
     @Environment(AppState.self) private var appState
-    
+    @Environment(StarredChannelsStore.self) private var starredStore
+
     let channel: Channel
     let server: Server?
-    
+
     private var isStarred: Bool {
-        StarredChannelsManager.shared.isStarred(channel.id)
+        starredStore.isStarred(channel.id)
     }
-    
+
     private var serverName: String {
-        server?.name ?? StarredChannelsManager.shared.serverName(for: channel.id)
+        server?.name ?? starredStore.serverName(for: channel.id)
     }
     
     var body: some View {
@@ -207,7 +208,7 @@ struct ChannelContextMenu: View {
     }
     
     private func toggleStar() {
-        let newState = StarredChannelsManager.shared.toggle(channelId: channel.id, serverName: serverName)
+        let newState = starredStore.toggle(channel: channel, serverName: serverName)
         HapticFeedback.light()
         ToastManager.shared.show(newState ? "Channel starred" : "Channel unstarred")
     }

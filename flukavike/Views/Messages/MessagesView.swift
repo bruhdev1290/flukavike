@@ -10,12 +10,16 @@ struct MessagesView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(AppState.self) private var appState
 
-    @State private var dmChannels: [DMChannelResponse] = []
     @State private var isLoading: Bool = false
     @State private var selectedChannel: DMChannelResponse?
     @State private var showNewMessageSheet: Bool = false
+    @State private var lastMessages: [String: Message] = [:]
 
     private let apiService = APIService.shared
+
+    private var dmChannels: [DMChannelResponse] {
+        appState.dmChannels
+    }
 
     var body: some View {
         NavigationStack {
@@ -28,14 +32,17 @@ struct MessagesView: View {
                     emptyStateSection
                 } else {
                     ForEach(dmChannels) { dm in
-                        DMConversationRow(dm: dm)
+                        DMConversationRow(
+                            dm: dm,
+                            lastMessage: lastMessages[dm.id]
+                        )
                             .listRowBackground(themeManager.backgroundPrimary(colorScheme))
                             .listRowSeparator(.hidden)
                             .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                             .onTapGesture { selectedChannel = dm }
                             .swipeActions(edge: .trailing) {
                                 Button(role: .destructive) {
-                                    withAnimation { dmChannels.removeAll { $0.id == dm.id } }
+                                    deleteDM(dm)
                                 } label: { Label("Delete", systemImage: "trash") }
                             }
                     }
@@ -69,8 +76,23 @@ struct MessagesView: View {
                 .environment(themeManager)
                 .environment(appState)
             }
-            .task { await loadDMChannels() }
-            .refreshable { await loadDMChannels() }
+            .task {
+                await loadDMChannels()
+                await loadLastMessages()
+            }
+            .refreshable {
+                await loadDMChannels()
+                await loadLastMessages()
+            }
+            .onChange(of: appState.pendingDMNavigation) { _, pending in
+                guard let pending else { return }
+                if let dm = appState.dmChannel(for: pending.channelId) {
+                    selectedChannel = dm
+                } else if let userId = pending.userId {
+                    openDM(with: userId)
+                }
+                appState.pendingDMNavigation = nil
+            }
         }
     }
 
@@ -113,12 +135,38 @@ struct MessagesView: View {
         do {
             let channels = try await apiService.getUserDMChannels()
             await MainActor.run {
-                // Show only 1-on-1 DMs (type 1) sorted by most recent
-                dmChannels = channels.filter { $0.type == 1 }
+                appState.dmChannels = channels.sorted { lhs, rhs in
+                    let left = Int(lhs.lastMessageId ?? "0") ?? 0
+                    let right = Int(rhs.lastMessageId ?? "0") ?? 0
+                    return left > right
+                }
                 isLoading = false
             }
         } catch {
             await MainActor.run { isLoading = false }
+        }
+    }
+
+    private func loadLastMessages() async {
+        guard !dmChannels.isEmpty else { return }
+        await withTaskGroup(of: (String, Message?).self) { group in
+            for dm in dmChannels {
+                group.addTask {
+                    do {
+                        let messages = try await apiService.getMessages(channelId: dm.id, limit: 1)
+                        return (dm.id, messages.first)
+                    } catch {
+                        return (dm.id, nil)
+                    }
+                }
+            }
+            var results: [String: Message] = [:]
+            for await (channelId, message) in group {
+                if let message { results[channelId] = message }
+            }
+            await MainActor.run {
+                lastMessages = results
+            }
         }
     }
 
@@ -127,9 +175,7 @@ struct MessagesView: View {
             do {
                 let dm = try await apiService.openDMChannel(userId: userId)
                 await MainActor.run {
-                    if !dmChannels.contains(where: { $0.id == dm.id }) {
-                        dmChannels.insert(dm, at: 0)
-                    }
+                    appState.upsertDM(dm)
                     selectedChannel = dm
                     showNewMessageSheet = false
                 }
@@ -138,15 +184,30 @@ struct MessagesView: View {
             }
         }
     }
+
+    private func deleteDM(_ dm: DMChannelResponse) {
+        withAnimation {
+            appState.removeDM(id: dm.id)
+        }
+        Task {
+            try? await apiService.deleteChannel(channelId: dm.id)
+        }
+    }
 }
 
 // MARK: - DM Conversation Row
 struct DMConversationRow: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(PresenceStore.self) private var presenceStore
     let dm: DMChannelResponse
+    var lastMessage: Message?
 
     private var recipient: User? { dm.recipients.first }
+    private var status: UserStatus {
+        guard let recipient else { return .offline }
+        return presenceStore.presence(for: recipient.id)?.status ?? recipient.status
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -154,7 +215,7 @@ struct DMConversationRow: View {
                 if let user = recipient {
                     AvatarView(user: user, size: 50)
                     Circle()
-                        .fill(user.status.color)
+                        .fill(status.color)
                         .frame(width: 14, height: 14)
                         .overlay(Circle().stroke(themeManager.backgroundPrimary(colorScheme), lineWidth: 2))
                         .offset(x: 2, y: 2)
@@ -164,19 +225,31 @@ struct DMConversationRow: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(recipient?.formattedName ?? "Unknown")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(themeManager.textPrimary(colorScheme))
-                Text(recipient?.displayUsername ?? "")
-                    .font(.system(size: 14))
-                    .foregroundStyle(themeManager.textTertiary(colorScheme))
+                HStack(spacing: 8) {
+                    Text(recipient?.formattedName ?? "Unknown")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(themeManager.textPrimary(colorScheme))
+
+                    Spacer()
+
+                    if let lastMessage {
+                        Text(lastMessage.timestamp, style: .time)
+                            .font(.system(size: 12))
+                            .foregroundStyle(themeManager.textTertiary(colorScheme))
+                    }
+                }
+
+                if let lastMessage {
+                    Text(lastMessage.content.isEmpty ? "Sent an attachment" : lastMessage.content)
+                        .font(.system(size: 14))
+                        .foregroundStyle(themeManager.textSecondary(colorScheme))
+                        .lineLimit(1)
+                } else {
+                    Text(recipient?.displayUsername ?? "")
+                        .font(.system(size: 14))
+                        .foregroundStyle(themeManager.textTertiary(colorScheme))
+                }
             }
-
-            Spacer()
-
-            Image(systemName: "chevron.right")
-                .font(.system(size: 14))
-                .foregroundStyle(themeManager.textTertiary(colorScheme))
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 12)
@@ -401,4 +474,5 @@ extension Channel {
     MessagesView()
         .environment(ThemeManager())
         .environment(AppState())
+        .environment(PresenceStore.shared)
 }

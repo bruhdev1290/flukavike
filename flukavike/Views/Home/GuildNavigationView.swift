@@ -16,6 +16,7 @@ struct GuildNavigationView: View {
     @State private var showJoinServerSheet: Bool = false
     @State private var showSettings: Bool = false
     @State private var selectedChannel: Channel?
+    @State private var contextMenuChannel: Channel? = nil
     @State private var showMessages: Bool = false
 
     private let apiService = APIService.shared
@@ -34,8 +35,6 @@ struct GuildNavigationView: View {
             channelListPane
         }
         .background(themeManager.backgroundPrimary(colorScheme))
-        .navigationTitle(selectedServer?.name ?? "Servers")
-        .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 if isLoadingServers || isLoadingChannels {
@@ -97,6 +96,11 @@ struct GuildNavigationView: View {
                     .environment(appState)
             }
         }
+        .sheet(item: $contextMenuChannel) { channel in
+            ChannelContextMenu(channel: channel, server: selectedServer)
+                .environment(themeManager)
+                .environment(appState)
+        }
         .onAppear {
             if appState.railServers.isEmpty {
                 if isAuthenticated {
@@ -118,6 +122,26 @@ struct GuildNavigationView: View {
         .onChange(of: appState.gatewayGuilds) { _, _ in
             guard let server = appState.railSelectedServer else { return }
             Task { await loadChannels(for: server) }
+        }
+        .onChange(of: appState.pendingChannelNavigation) { _, pending in
+            guard let pending else { return }
+            if let server = appState.railServers.first(where: { $0.id == pending.serverId }) {
+                selectServer(server)
+                Task {
+                    await loadChannels(for: server)
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    if let channel = appState.railChannels.first(where: { $0.id == pending.channelId }) {
+                        await MainActor.run {
+                            selectedChannel = channel
+                            appState.pendingChannelNavigation = nil
+                        }
+                    }
+                }
+            }
+        }
+        .onChange(of: appState.pendingDMNavigation) { _, pending in
+            guard pending != nil else { return }
+            showMessages = true
         }
     }
 
@@ -275,7 +299,7 @@ struct GuildNavigationView: View {
                                     appState.selectedChannel = channel
                                 }
                                 .onLongPressGesture {
-                                    // TODO: channel context menu
+                                    contextMenuChannel = channel
                                     HapticFeedback.medium()
                                 }
 

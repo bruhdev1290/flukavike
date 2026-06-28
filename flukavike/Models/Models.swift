@@ -707,8 +707,45 @@ struct AppNotification: Identifiable, Codable, Equatable {
     let timestamp: Date
     let read: Bool
     let relatedId: String?
+    let channelId: String?
+    let messageId: String?
+    let senderId: String?
+    let senderAvatarUrl: String?
     let serverId: String?
     let serverName: String?
+    let dmRecipientId: String?
+
+    init(
+        id: String,
+        type: NotificationType,
+        title: String,
+        message: String,
+        timestamp: Date,
+        read: Bool,
+        relatedId: String? = nil,
+        channelId: String? = nil,
+        messageId: String? = nil,
+        senderId: String? = nil,
+        senderAvatarUrl: String? = nil,
+        serverId: String? = nil,
+        serverName: String? = nil,
+        dmRecipientId: String? = nil
+    ) {
+        self.id = id
+        self.type = type
+        self.title = title
+        self.message = message
+        self.timestamp = timestamp
+        self.read = read
+        self.relatedId = relatedId
+        self.channelId = channelId
+        self.messageId = messageId
+        self.senderId = senderId
+        self.senderAvatarUrl = senderAvatarUrl
+        self.serverId = serverId
+        self.serverName = serverName
+        self.dmRecipientId = dmRecipientId
+    }
     
     enum NotificationType: String, Codable {
         case mention
@@ -756,6 +793,9 @@ struct AppNotification: Identifiable, Codable, Equatable {
             timestamp: Date().addingTimeInterval(-300),
             read: false,
             relatedId: "m1",
+            channelId: "c1",
+            messageId: "m1",
+            senderId: "u1",
             serverId: "1",
             serverName: "Flukavike HQ"
         ),

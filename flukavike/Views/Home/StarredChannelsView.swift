@@ -5,80 +5,16 @@
 
 import SwiftUI
 
-// MARK: - Starred Channels Manager
-@Observable
-class StarredChannelsManager {
-    static let shared = StarredChannelsManager()
-    private let idsKey = "starred_channel_ids"
-    private let namesKey = "starred_server_names"   // [channelId: serverName]
-    private let channelsKey = "starred_channel_data" // [channelId: channelJson]
-
-    private(set) var starredIds: Set<String>
-    private var serverNames: [String: String]
-
-    private init() {
-        starredIds = Set(UserDefaults.standard.stringArray(forKey: idsKey) ?? [])
-        serverNames = (UserDefaults.standard.dictionary(forKey: "starred_server_names") as? [String: String]) ?? [:]
-    }
-
-    func serverName(for channelId: String) -> String {
-        serverNames[channelId] ?? ""
-    }
-
-    /// Toggles the starred state. Pass serverName so it can be shown even when guild data is incomplete.
-    @discardableResult
-    func toggle(channelId: String, serverName: String) -> Bool {
-        if starredIds.contains(channelId) {
-            starredIds.remove(channelId)
-            serverNames.removeValue(forKey: channelId)
-        } else {
-            starredIds.insert(channelId)
-            if !serverName.isEmpty { serverNames[channelId] = serverName }
-        }
-        UserDefaults.standard.set(Array(starredIds), forKey: idsKey)
-        UserDefaults.standard.set(serverNames, forKey: namesKey)
-        return starredIds.contains(channelId)
-    }
-
-    func isStarred(_ channelId: String) -> Bool {
-        starredIds.contains(channelId)
-    }
-
-    /// Returns starred channels found across all guilds, with correct server name.
-    /// Uses REST servers for proper names (gateway guilds often lack `name`).
-    func starredChannels(from guilds: [Server], restServers: [Server] = []) -> [(serverName: String, channel: Channel)] {
-        var result: [(String, Channel)] = []
-        for guild in guilds {
-            for channel in guild.channels.sorted(by: { $0.position < $1.position }) where starredIds.contains(channel.id) {
-                // Priority: REST server name → stored name → gateway name → stored server name
-                let restName = restServers.first(where: { $0.id == guild.id })?.name
-                let name: String
-                if let r = restName, !r.isEmpty, r != "Unknown Server" {
-                    name = r
-                } else if let stored = serverNames[channel.id], !stored.isEmpty, stored != "Unknown Server" {
-                    name = stored
-                } else if guild.name != "Unknown Server", !guild.name.isEmpty {
-                    name = guild.name
-                } else {
-                    name = serverNames[channel.id] ?? guild.name
-                }
-                result.append((name, channel))
-            }
-        }
-        return result
-    }
-}
-
-// MARK: - Starred Channels View
 struct StarredChannelsView: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(\.colorScheme) private var colorScheme
     @Environment(AppState.self) private var appState
+    @Environment(StarredChannelsStore.self) private var starredStore
 
     @State private var selectedChannel: Channel?
 
     private var starred: [(serverName: String, channel: Channel)] {
-        StarredChannelsManager.shared.starredChannels(from: appState.gatewayGuilds, restServers: appState.restServers)
+        starredStore.starredChannels(from: appState.gatewayGuilds, restServers: appState.restServers)
     }
 
     var body: some View {
@@ -98,7 +34,7 @@ struct StarredChannelsView: View {
             }
         }
     }
-    
+
     private var channelList: some View {
         List {
             ForEach(starred, id: \.channel.id) { item in
@@ -120,6 +56,14 @@ struct StarredChannelsView: View {
 
                         Spacer()
 
+                        if item.channel.hasMention {
+                            MentionBadge(count: item.channel.mentionCount)
+                        } else if item.channel.hasUnread {
+                            Circle()
+                                .fill(themeManager.accentColor.color)
+                                .frame(width: 8, height: 8)
+                        }
+
                         Image(systemName: "star.fill")
                             .font(.system(size: 13))
                             .foregroundStyle(.yellow)
@@ -129,6 +73,15 @@ struct StarredChannelsView: View {
                 .listRowBackground(themeManager.backgroundPrimary(colorScheme))
                 .listRowSeparator(.hidden)
                 .buttonStyle(PlainButtonStyle())
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) {
+                        starredStore.remove(channelId: item.channel.id)
+                        HapticFeedback.light()
+                    } label: {
+                        Label("Unstar", systemImage: "star.slash.fill")
+                    }
+                    .tint(.yellow)
+                }
             }
         }
         .listStyle(.plain)
@@ -155,4 +108,11 @@ struct StarredChannelsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+}
+
+#Preview {
+    StarredChannelsView()
+        .environment(ThemeManager())
+        .environment(AppState())
+        .environment(StarredChannelsStore.shared)
 }

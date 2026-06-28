@@ -5,6 +5,7 @@
 
 import SwiftUI
 import AVFoundation
+import LiveKit
 
 struct VoiceChannelView: View {
     @Environment(ThemeManager.self) private var themeManager
@@ -18,10 +19,10 @@ struct VoiceChannelView: View {
     @State private var isConnecting = true
     @State private var connectionError: String?
     @State private var participantRefreshTrigger = UUID()
-    
+
     // Use participants from the service
     private var participants: [VoiceParticipant] {
-        _ = participantRefreshTrigger  // Dependency to trigger refresh
+        _ = participantRefreshTrigger
         return callService.voiceParticipants
     }
 
@@ -29,22 +30,16 @@ struct VoiceChannelView: View {
 
     var body: some View {
         ZStack {
-            // Background
             Color.black.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Nav bar area
                 navBar
 
-                // Participant grid
                 GeometryReader { geo in
                     participantGrid(size: geo.size)
                 }
 
-                // Status bar
                 statusBar
-
-                // Bottom controls
                 controlBar
             }
         }
@@ -82,7 +77,7 @@ struct VoiceChannelView: View {
                         .font(.system(size: 12))
                         .foregroundStyle(.red)
                 } else {
-                    let count = participants.count + 1 // +1 for self
+                    let count = participants.count + 1
                     Text("\(count) \(count == 1 ? "person" : "people") in channel")
                         .font(.system(size: 12))
                         .foregroundStyle(.white.opacity(0.6))
@@ -91,7 +86,6 @@ struct VoiceChannelView: View {
 
             Spacer()
 
-            // Empty spacer to balance layout
             Color.clear
                 .frame(width: 36, height: 36)
         }
@@ -102,26 +96,29 @@ struct VoiceChannelView: View {
 
     @ViewBuilder
     private func participantGrid(size: CGSize) -> some View {
-        let all = selfTile + participants.map { ParticipantInfo(from: $0) }
+        let all = selfTile + participants.map { ParticipantInfo(from: $0, connection: callService.voiceConnection) }
         let cols = gridColumnCount(for: all.count)
-        let itemW = (size.width - CGFloat(cols + 1) * 12) / CGFloat(cols)
-        let itemH = min(itemW * 1.2, (size.height - 20) / CGFloat(ceil(Double(all.count) / Double(cols))))
+        let hSpacing: CGFloat = 12
+        let vSpacing: CGFloat = 12
+        let itemW = (size.width - CGFloat(cols + 1) * hSpacing) / CGFloat(cols)
+        let rows = ceil(Double(all.count) / Double(cols))
+        let maxItemH = rows > 0 ? (size.height - CGFloat(rows + 1) * vSpacing) / CGFloat(rows) : size.height
+        let itemH = min(itemW * 1.2, maxItemH)
 
         ScrollView {
             LazyVGrid(
-                columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: cols),
-                spacing: 12
+                columns: Array(repeating: GridItem(.flexible(), spacing: hSpacing), count: cols),
+                spacing: vSpacing
             ) {
                 ForEach(all) { info in
                     ParticipantTile(
                         info: info,
-                        isSelf: info.isSelf,
-                        showCamera: info.isSelf && callService.isVideoEnabled
+                        isSelf: info.isSelf
                     )
                     .frame(height: itemH)
                 }
             }
-            .padding(12)
+            .padding(hSpacing)
         }
     }
 
@@ -132,9 +129,10 @@ struct VoiceChannelView: View {
             user: me,
             isMuted: callService.isMuted,
             isDeafened: callService.isDeafened,
-            isSpeaking: false,
+            isSpeaking: callService.isLocalSpeaking,
             isScreenSharing: callService.isScreenSharing,
-            isSelf: true
+            isSelf: true,
+            cameraTrack: callService.voiceConnection?.localCameraTrack
         )]
     }
 
@@ -171,7 +169,6 @@ struct VoiceChannelView: View {
 
     private var controlBar: some View {
         HStack(spacing: 0) {
-            // Mute
             VoiceControlButton(
                 icon: callService.isMuted ? "mic.slash.fill" : "mic.fill",
                 label: callService.isMuted ? "Unmute" : "Mute",
@@ -181,17 +178,15 @@ struct VoiceChannelView: View {
                 Task { try? await callService.toggleMute() }
             }
 
-            // Deafen
             VoiceControlButton(
                 icon: callService.isDeafened ? "speaker.slash.fill" : "headphones",
                 label: callService.isDeafened ? "Undeafen" : "Deafen",
                 isActive: callService.isDeafened,
                 activeColor: .red
             ) {
-                callService.toggleDeafen()
+                Task { await callService.toggleDeafen() }
             }
 
-            // Camera
             VoiceControlButton(
                 icon: callService.isVideoEnabled ? "video.fill" : "video.slash.fill",
                 label: callService.isVideoEnabled ? "Stop Video" : "Camera",
@@ -201,7 +196,6 @@ struct VoiceChannelView: View {
                 callService.toggleCamera()
             }
 
-            // Screen Share
             VoiceControlButton(
                 icon: callService.isScreenSharing ? "rectangle.inset.filled.and.person.filled" : "rectangle.on.rectangle",
                 label: callService.isScreenSharing ? "Stop Share" : "Share",
@@ -227,7 +221,6 @@ struct VoiceChannelView: View {
                 }
             }
 
-            // Disconnect
             VoiceControlButton(
                 icon: "phone.down.fill",
                 label: "Leave",
@@ -248,39 +241,31 @@ struct VoiceChannelView: View {
     private func join() async {
         isConnecting = true
         connectionError = nil
-        
+
         do {
-            // If we're already connected to this channel, avoid duplicate join attempts.
             if callService.selectedVoiceChannel?.id == channel.id,
                callService.voiceConnection?.room != nil {
                 isConnecting = false
                 return
             }
 
-            // Set up callback for participant updates
-            callService.onParticipantsUpdated = { 
-                // Force UI refresh when participants change
+            callService.onParticipantsUpdated = {
                 Task { @MainActor in
                     participantRefreshTrigger = UUID()
                 }
             }
-            
-            // Store selected channel in service first
+
             callService.selectedVoiceChannel = channel
-            
-            // Join the voice channel with timeout
             try await callService.joinVoiceChannel(channel.id)
-            
+
             isConnecting = false
         } catch {
             print("[VoiceChannel] Failed to join: \(error)")
             isConnecting = false
-            // Avoid false negative when we already have live participant state.
             if !callService.voiceParticipants.isEmpty || callService.voiceConnection?.room != nil {
                 connectionError = nil
             } else {
                 connectionError = "Failed to connect"
-                // Clear selected channel only on true failure.
                 callService.selectedVoiceChannel = nil
             }
         }
@@ -302,35 +287,7 @@ struct VoiceChannelView: View {
     }
 }
 
-// MARK: - Tab Button
-
-struct TabButton: View {
-    let icon: String
-    let label: String
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.system(size: 14))
-                Text(label)
-                    .font(.system(size: 14, weight: .medium))
-            }
-            .foregroundStyle(isSelected ? .white : .white.opacity(0.6))
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity)
-            .background(
-                Capsule()
-                    .fill(isSelected ? Color.white.opacity(0.2) : Color.clear)
-            )
-        }
-        .buttonStyle(PlainButtonStyle())
-    }
-}
-
-// MARK: - Participant Info (display model)
+// MARK: - Participant Info
 
 struct ParticipantInfo: Identifiable {
     let id: String
@@ -340,18 +297,45 @@ struct ParticipantInfo: Identifiable {
     let isSpeaking: Bool
     let isScreenSharing: Bool
     let isSelf: Bool
+    let cameraTrack: VideoTrack?
+    let screenShareTrack: VideoTrack?
 
-    init(id: String, user: User, isMuted: Bool, isDeafened: Bool, isSpeaking: Bool, isScreenSharing: Bool, isSelf: Bool) {
-        self.id = id; self.user = user; self.isMuted = isMuted
-        self.isDeafened = isDeafened; self.isSpeaking = isSpeaking
-        self.isScreenSharing = isScreenSharing; self.isSelf = isSelf
+    init(
+        id: String,
+        user: User,
+        isMuted: Bool,
+        isDeafened: Bool,
+        isSpeaking: Bool,
+        isScreenSharing: Bool,
+        isSelf: Bool,
+        cameraTrack: VideoTrack? = nil,
+        screenShareTrack: VideoTrack? = nil
+    ) {
+        self.id = id
+        self.user = user
+        self.isMuted = isMuted
+        self.isDeafened = isDeafened
+        self.isSpeaking = isSpeaking
+        self.isScreenSharing = isScreenSharing
+        self.isSelf = isSelf
+        self.cameraTrack = cameraTrack
+        self.screenShareTrack = screenShareTrack
     }
 
-    init(from p: VoiceParticipant) {
-        id = p.user.id; user = p.user
+    init(from p: VoiceParticipant, connection: VoiceConnection?) {
+        id = p.user.id
+        user = p.user
         isMuted = p.voiceState.selfMute || p.voiceState.mute
         isDeafened = p.voiceState.selfDeaf || p.voiceState.deaf
-        isSpeaking = p.isSpeaking; isScreenSharing = false; isSelf = false
+        isSpeaking = p.isSpeaking
+        isSelf = false
+
+        let remoteParticipant = connection?.room?.remoteParticipants.values.first {
+            $0.identity?.stringValue == p.user.id
+        }
+        screenShareTrack = remoteParticipant?.firstScreenShareVideoTrack
+        cameraTrack = remoteParticipant?.firstCameraVideoTrack
+        isScreenSharing = screenShareTrack != nil
     }
 }
 
@@ -360,8 +344,7 @@ struct ParticipantInfo: Identifiable {
 struct ParticipantTile: View {
     let info: ParticipantInfo
     let isSelf: Bool
-    let showCamera: Bool
-    
+
     private var participantLabel: String {
         if isSelf { return "You" }
         let display = info.user.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -376,28 +359,14 @@ struct ParticipantTile: View {
             RoundedRectangle(cornerRadius: 16)
                 .fill(Color.white.opacity(0.07))
 
-            // Speaking ring
             if info.isSpeaking {
                 RoundedRectangle(cornerRadius: 16)
                     .stroke(Color.green, lineWidth: 3)
             }
 
-            if showCamera {
-                // Live camera preview for self
-                LocalCameraPreview()
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-            } else {
-                VStack(spacing: 10) {
-                    AvatarView(user: info.user, size: 64, showStatus: false)
+            videoContent
+                .clipShape(RoundedRectangle(cornerRadius: 16))
 
-                    Text(participantLabel)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                }
-            }
-
-            // Badges (top-right)
             VStack {
                 HStack {
                     Spacer()
@@ -409,7 +378,6 @@ struct ParticipantTile: View {
                 }
                 Spacer()
                 HStack {
-                    // Mute badge (bottom-left)
                     if info.isMuted {
                         Image(systemName: "mic.slash.fill")
                             .voiceBadge(color: .red)
@@ -427,6 +395,24 @@ struct ParticipantTile: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(participantLabel)\(info.isSpeaking ? ", speaking" : "")\(info.isMuted ? ", muted" : "")\(info.isDeafened ? ", deafened" : "")\(info.isScreenSharing ? ", screen sharing" : "")")
+    }
+
+    @ViewBuilder
+    private var videoContent: some View {
+        if let screen = info.screenShareTrack {
+            SwiftUIVideoView(screen, layoutMode: .fill)
+        } else if let camera = info.cameraTrack {
+            SwiftUIVideoView(camera, layoutMode: .fill)
+        } else {
+            VStack(spacing: 10) {
+                AvatarView(user: info.user, size: 64, showStatus: false)
+
+                Text(participantLabel)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+            }
+        }
     }
 }
 
@@ -462,39 +448,6 @@ struct VoiceControlButton: View {
         .frame(maxWidth: .infinity)
         .buttonStyle(PlainButtonStyle())
         .accessibilityLabel(label)
-    }
-}
-
-// MARK: - Local Camera Preview
-
-struct LocalCameraPreview: UIViewRepresentable {
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView()
-        let session = AVCaptureSession()
-        guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front),
-              let input = try? AVCaptureDeviceInput(device: device) else { return view }
-        session.addInput(input)
-        let layer = AVCaptureVideoPreviewLayer(session: session)
-        layer.videoGravity = .resizeAspectFill
-        view.layer.addSublayer(layer)
-        context.coordinator.layer = layer
-        context.coordinator.session = session
-        DispatchQueue.global(qos: .userInitiated).async { session.startRunning() }
-        return view
-    }
-
-    func updateUIView(_ uiView: UIView, context: Context) {
-        DispatchQueue.main.async {
-            context.coordinator.layer?.frame = uiView.bounds
-        }
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    class Coordinator {
-        var layer: AVCaptureVideoPreviewLayer?
-        var session: AVCaptureSession?
-        deinit { session?.stopRunning() }
     }
 }
 

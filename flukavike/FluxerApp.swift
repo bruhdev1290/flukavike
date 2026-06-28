@@ -21,6 +21,8 @@ struct FluxerApp: App {
     // State
     @State private var themeManager = ThemeManager()
     @State private var appState = AppState()
+    @State private var presenceStore = PresenceStore.shared
+    @State private var starredChannelsStore = StarredChannelsStore.shared
 
     // View State
     @State private var showIncomingCall = false
@@ -52,6 +54,8 @@ struct FluxerApp: App {
             }
             .environment(themeManager)
             .environment(appState)
+            .environment(presenceStore)
+            .environment(starredChannelsStore)
             .environment(apiService)
             .environment(webSocketService)
             .environment(webAuthService)
@@ -67,6 +71,27 @@ struct FluxerApp: App {
                       let channelId = info["channelId"] as? String,
                       let serverId  = info["serverId"]  as? String else { return }
                 appState.pendingChannelNavigation = AppState.ChannelNavigation(serverId: serverId, channelId: channelId)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .init("ViewConversationIntent"))) { note in
+                guard let info = note.userInfo,
+                      let userId = info["userId"] as? String else { return }
+                Task {
+                    if let dm = appState.dmChannel(withRecipient: userId) {
+                        await MainActor.run {
+                            appState.pendingDMNavigation = AppState.DMNavigation(channelId: dm.id, userId: userId)
+                        }
+                    } else {
+                        do {
+                            let dm = try await apiService.openDMChannel(userId: userId)
+                            await MainActor.run {
+                                appState.upsertDM(dm)
+                                appState.pendingDMNavigation = AppState.DMNavigation(channelId: dm.id, userId: userId)
+                            }
+                        } catch {
+                            NSLog("[flukavike] Failed to open DM from deep link: %@", String(describing: error))
+                        }
+                    }
+                }
             }
             .onChange(of: webAuthService.isAuthenticated) { _, isAuthenticated in
                 startupState = isAuthenticated ? .authenticated : .needsAuth
@@ -221,10 +246,44 @@ struct FluxerApp: App {
         // Removing or bypassing this assignment will break channel loading for every server.
         webSocketService.onReady = { ready in
             appState.currentUser = ready.user
+            Task {
+                await UserCache.shared.cache(ready.user)
+            }
             if !ready.guilds.isEmpty {
                 appState.gatewayGuilds = ready.guilds
                 ChannelStore.shared.update(guilds: ready.guilds, restServers: appState.restServers)
             }
+        }
+
+        webSocketService.onPresenceUpdate = { update in
+            presenceStore.update(from: update)
+            if let username = update.user.username, let avatar = update.user.avatar {
+                Task {
+                    await UserCache.shared.cache(User(
+                        id: update.user.id,
+                        username: username,
+                        displayName: update.user.globalName,
+                        avatarUrl: avatar,
+                        bannerUrl: nil,
+                        bio: nil,
+                        status: UserStatus(rawValue: update.status) ?? .offline,
+                        customStatus: update.customStatus,
+                        bot: false,
+                        createdAt: Date()
+                    ))
+                }
+            }
+        }
+
+        webSocketService.onDMChannelCreate = { channel in
+            appState.upsertDM(channel)
+            Task {
+                await UserCache.shared.cache(channel.recipients)
+            }
+        }
+
+        webSocketService.onDMChannelDelete = { channelId in
+            appState.removeDM(id: channelId)
         }
         
         webSocketService.onMessageCreate = { message in
@@ -252,13 +311,17 @@ struct FluxerApp: App {
             pushService.incrementBadge()
 
             let notification = AppNotification(
-                id: message.id,
+                id: "msg-\(message.id)",
                 type: .mention,
                 title: "\(message.author.formattedName) mentioned you",
                 message: message.content,
                 timestamp: message.timestamp,
                 read: false,
                 relatedId: message.id,
+                channelId: message.channelId,
+                messageId: message.id,
+                senderId: message.author.id,
+                senderAvatarUrl: message.author.avatarUrl,
                 serverId: guild?.id,
                 serverName: guild?.name
             )

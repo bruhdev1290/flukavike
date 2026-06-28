@@ -7,6 +7,7 @@ import SwiftUI
 import CallKit
 import AVFoundation
 import OSLog
+import LiveKit
 
 @Observable
 class FlukavikeCallService: NSObject {
@@ -25,7 +26,8 @@ class FlukavikeCallService: NSObject {
     var isVideoEnabled: Bool = false
     var isScreenSharing: Bool = false
     var isDeafened: Bool = false
-    
+    @MainActor var isLocalSpeaking: Bool = false
+
     // Voice connection
     var voiceConnection: VoiceConnection?
     var selectedVoiceChannel: Channel?
@@ -181,9 +183,7 @@ class FlukavikeCallService: NSObject {
         
         try await callController.request(transaction)
         
-        await MainActor.run {
-            self.cleanupCall()
-        }
+        await self.cleanupCall()
     }
     
     // MARK: - Voice Channel Operations
@@ -192,7 +192,12 @@ class FlukavikeCallService: NSObject {
         // Step 1: Send gateway op 4 to join the voice channel
         // The gateway will respond with VOICE_SERVER_UPDATE containing LiveKit token + endpoint
         guard let ws = webSocketService else { throw VoiceError.notConnected }
-        
+
+        // If we're already in a different channel, leave it cleanly first.
+        if let currentChannel = joinedVoiceChannelId, currentChannel != channelId {
+            await leaveVoiceChannel()
+        }
+
         // Get the guildId for this channel if available
         let guildId = findGuildIdForChannel(channelId)
         print("[Voice] Joining channel \(channelId) in guild \(guildId ?? "none")")
@@ -221,6 +226,11 @@ class FlukavikeCallService: NSObject {
         let conn = VoiceConnection(endpoint: voiceServer.endpoint, token: voiceServer.token)
         conn.onParticipantsSnapshot = { [weak self] snapshot in
             self?.applyLiveKitParticipantsSnapshot(snapshot)
+        }
+        conn.onLocalSpeakingChanged = { [weak self] speaking in
+            Task { @MainActor in
+                self?.isLocalSpeaking = speaking
+            }
         }
         voiceConnection = conn
         try await conn.connect()
@@ -273,15 +283,20 @@ class FlukavikeCallService: NSObject {
     }
     
     func leaveVoiceChannel() async {
-        voiceConnection?.disconnect()
+        await voiceConnection?.disconnect()
         voiceConnection = nil
         // Tell gateway we left (op 4 with channel_id: null)
         webSocketService?.sendVoiceLeave(guildId: joinedVoiceGuildId ?? webSocketService?.currentGuildId)
         joinedVoiceChannelId = nil
         joinedVoiceGuildId = nil
-        await MainActor.run { 
-            self.selectedVoiceChannel = nil 
+        await MainActor.run {
+            self.selectedVoiceChannel = nil
             self.voiceParticipants = []
+            self.isMuted = false
+            self.isDeafened = false
+            self.isVideoEnabled = false
+            self.isScreenSharing = false
+            self.isLocalSpeaking = false
         }
     }
     
@@ -316,9 +331,9 @@ class FlukavikeCallService: NSObject {
         provider?.reportCall(with: UUID(uuidString: call.id) ?? UUID(), updated: update)
     }
     
-    func toggleDeafen() {
+    func toggleDeafen() async {
         isDeafened.toggle()
-        voiceConnection?.setDeafen(isDeafened)
+        await voiceConnection?.setDeafen(isDeafened)
         publishCurrentVoiceState()
     }
 
@@ -415,8 +430,8 @@ class FlukavikeCallService: NSObject {
     private func handleCallEnded(_ callId: String) {
         guard activeCall?.id == callId else { return }
         
-        DispatchQueue.main.async { [weak self] in
-            self?.cleanupCall()
+        Task { @MainActor [weak self] in
+            await self?.cleanupCall()
             self?.onCallEnded?()
         }
     }
@@ -656,13 +671,14 @@ class FlukavikeCallService: NSObject {
         return []
     }
     
-    private func cleanupCall() {
+    private func cleanupCall() async {
         activeCall = nil
         isMuted = false
         isVideoEnabled = false
         isDeafened = false
         isScreenSharing = false
-        voiceConnection?.disconnect()
+        isLocalSpeaking = false
+        await voiceConnection?.disconnect()
         voiceConnection = nil
     }
 }
@@ -673,7 +689,7 @@ extension FlukavikeCallService: CXProviderDelegate {
     func providerDidReset(_ provider: CXProvider) {
         Task {
             await leaveVoiceChannel()
-            cleanupCall()
+            await cleanupCall()
         }
     }
     
@@ -694,6 +710,7 @@ extension FlukavikeCallService: CXProviderDelegate {
     func provider(_ provider: CXProvider, perform action: CXSetMutedCallAction) {
         Task {
             isMuted = action.isMuted
+            voiceConnection?.setMute(isMuted)
             if let call = activeCall {
                 try? await apiService?.updateCallState(
                     callId: call.id,
@@ -844,9 +861,27 @@ class VoiceConnection {
     private(set) var room: Room?
     var onParticipantsSnapshot: (([VoiceConnectionParticipant]) -> Void)?
 
+    private(set) var isDeafened: Bool = false
+    private var savedRemoteVolumes: [String: Double] = [:]
+    var onLocalSpeakingChanged: ((Bool) -> Void)?
+
     init(endpoint: String, token: String) {
         self.endpoint = endpoint
         self.token = token
+    }
+
+    var localCameraTrack: VideoTrack? {
+        room?.localParticipant.firstCameraVideoTrack
+    }
+
+    func remoteVideoTrack(for identity: String) -> VideoTrack? {
+        guard let room else { return nil }
+        let participant = room.remoteParticipants.values.first { $0.identity?.stringValue == identity }
+        return participant?.firstScreenShareVideoTrack ?? participant?.firstCameraVideoTrack
+    }
+
+    func isLocalSpeaking(in room: Room) -> Bool {
+        room.localParticipant.isSpeaking
     }
 
     func connect() async throws {
@@ -861,8 +896,8 @@ class VoiceConnection {
         publishParticipantSnapshot()
     }
 
-    func disconnect() {
-        Task { await room?.disconnect() }
+    func disconnect() async {
+        await room?.disconnect()
         room = nil
         onParticipantsSnapshot?([])
     }
@@ -882,13 +917,41 @@ class VoiceConnection {
         _ = try await room.localParticipant.setScreenShare(enabled: enabled)
     }
 
-    func setDeafen(_ deafened: Bool) {
-        // Set output volume to 0 when deafened via AVAudioSession
-        let volume: Float = deafened ? 0 : 1
-        try? AVAudioSession.sharedInstance().setActive(true)
-        // LiveKit doesn't expose per-track mute for remote audio from the receiver side;
-        // deafen is handled at the audio output level
-        _ = volume // volume control requires AVAudioPlayer or system API
+    func setDeafen(_ deafened: Bool) async {
+        isDeafened = deafened
+        await MainActor.run {
+            guard let room else { return }
+            for participant in room.remoteParticipants.values {
+                for publication in participant.audioTracks {
+                    guard let audioTrack = publication.track as? RemoteAudioTrack else { continue }
+                    let sid = publication.sid.stringValue
+                    if deafened {
+                        // Save current volume before muting
+                        if savedRemoteVolumes[sid] == nil {
+                            savedRemoteVolumes[sid] = audioTrack.volume
+                        }
+                        audioTrack.volume = 0
+                    } else {
+                        audioTrack.volume = savedRemoteVolumes[sid] ?? 1.0
+                    }
+                }
+            }
+            if !deafened {
+                savedRemoteVolumes.removeAll()
+            }
+        }
+    }
+
+    private func applyDeafenState(to participant: RemoteParticipant) {
+        guard isDeafened else { return }
+        for publication in participant.audioTracks {
+            guard let audioTrack = publication.track as? RemoteAudioTrack else { continue }
+            let sid = publication.sid.stringValue
+            if savedRemoteVolumes[sid] == nil {
+                savedRemoteVolumes[sid] = audioTrack.volume
+            }
+            audioTrack.volume = 0
+        }
     }
 
     private func publishParticipantSnapshot() {
@@ -948,6 +1011,7 @@ extension VoiceConnection: RoomDelegate {
     }
 
     func room(_ room: Room, participantDidConnect participant: RemoteParticipant) {
+        applyDeafenState(to: participant)
         publishParticipantSnapshot()
     }
 
@@ -956,6 +1020,8 @@ extension VoiceConnection: RoomDelegate {
     }
 
     func room(_ room: Room, didUpdateSpeakingParticipants participants: [Participant]) {
+        let localSpeaking = participants.contains(where: { $0 === room.localParticipant }) || room.localParticipant.isSpeaking
+        onLocalSpeakingChanged?(localSpeaking)
         publishParticipantSnapshot()
     }
 }
