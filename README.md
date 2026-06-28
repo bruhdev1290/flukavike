@@ -35,19 +35,24 @@ This project follows these design principles:
 | **Theme System** | Light, Dark, OLED Dark, Sandstone, Ocean, Forest, Solarized modes with 11 accent colors |
 | **App Lock** | Biometric (Face ID / Touch ID) + PIN protection for app data |
 | **Accessibility** | Increase Contrast toggle for improved legibility |
-| **Home Screen** | Server pills, pinned channels, recent conversations |
-| **Chat Interface** | Message bubbles, reactions, voice messages, rich attachments, replies |
+| **Home Shell** | Sidebar navigation with DMs, Favorites, and Guilds sections |
+| **Chat Interface** | Message bubbles, reactions, voice messages, rich attachments, inline replies |
+| **GIF Support** | Pick and send GIFs via the system document picker |
+| **Quick Switcher** | Cmd-K switcher to jump between channels and DMs instantly |
 | **Navigation** | Customizable tab bar with floating compose button |
 | **Notifications** | Push notifications with mentions, DMs, calls |
 | **Voice/Video Calls** | CallKit native integration for calls |
-| **Voice Channels** | Join voice channels with participant tracking, speaking indicators |
+| **Voice Channels** | Join voice channels with participant tracking and speaking indicators |
+| **Presence** | Real-time user online/offline/idle status via PresenceStore |
+| **Image Caching** | Efficient async image loading with in-memory cache |
 | **Profile** | User profiles with stats and customization |
 | **Settings** | Comprehensive settings with appearance options |
 | **Onboarding** | Welcome flow with web-based OAuth login |
 | **Authentication** | Secure token storage in Keychain with web OAuth flow |
-| **Composer** | Rich message composer with attachments and voice recording |
+| **Composer** | Rich message composer with attachments, GIFs, and voice recording |
 | **Search** | Global search for messages and content |
 | **Messages View** | Dedicated messages/DMs interface |
+| **Starred Channels** | Persistent favorites synced across sessions |
 
 ### Design Highlights
 
@@ -70,7 +75,6 @@ flukavike/
 ├── Services/
 │   ├── APIService.swift         # Fluxer REST API client
 │   ├── WebSocketService.swift   # Real-time Gateway connection
-│   ├── AuthService.swift        # Authentication management (legacy)
 │   ├── WebAuthService.swift     # Web-based OAuth authentication
 │   ├── KeychainTokenStore.swift # Secure token storage
 │   ├── FluxerCallService.swift  # CallKit & voice calls
@@ -78,9 +82,13 @@ flukavike/
 │   ├── AudioPlayerService.swift # Voice message playback
 │   ├── BiometricLockService.swift # App lock (Face ID/Touch ID + PIN)
 │   ├── PushNotificationService.swift # APNs handling
+│   ├── UserCache.swift          # In-memory user object cache
 │   └── SiriDonationService.swift # Siri intent donation
 ├── Stores/
-│   └── ThemeManager.swift       # Theme & state management
+│   ├── ThemeManager.swift       # Theme & app state management
+│   ├── ImageCache.swift         # Async image caching
+│   ├── PresenceStore.swift      # Real-time user presence
+│   └── StarredChannelsStore.swift # Persisted starred channels
 ├── Models/
 │   └── Models.swift             # Data models (User, Message, Server, etc.)
 ├── Views/
@@ -90,7 +98,9 @@ flukavike/
 │   │   ├── WebLoginView.swift   # Web-based OAuth login
 │   │   └── WebAPILoginView.swift # API-based login fallback
 │   ├── Home/
-│   │   ├── HomeView.swift       # Home dashboard
+│   │   ├── HomeShellView.swift  # Sidebar shell (DMs / Favorites / Guilds)
+│   │   ├── HomeView.swift       # Home dashboard content
+│   │   ├── GuildNavigationView.swift # Server/guild navigation sidebar
 │   │   ├── ChannelListView.swift # Channel browser
 │   │   └── StarredChannelsView.swift # Starred channels list
 │   ├── Messages/
@@ -114,6 +124,9 @@ flukavike/
 │   └── Common/
 │       ├── CommonViews.swift    # Shared UI components
 │       ├── AppLockView.swift    # Biometric + PIN lock overlay
+│       ├── CachedAsyncImage.swift # AsyncImage wrapper with caching
+│       ├── QuickSwitcherView.swift # Cmd-K channel/DM quick switcher
+│       ├── GIFDocumentPicker.swift # System GIF file picker
 │       ├── ContextMenus.swift   # Channel/server/DM context menus
 │       └── HCaptchaView.swift   # hCaptcha verification
 ├── Intents/
@@ -240,18 +253,32 @@ The channel loading flow is:
 
 ## Recent Updates
 
+### App Lock (Face ID / Touch ID + PIN)
+Full biometric protection with fallback PIN. Lock screen appears on app background/foreground and at launch.
 
-### Messages View
-Dedicated interface for direct messages and conversations, separate from server channels.
+### Home Shell Redesign
+New sidebar-driven layout with separate sections for DMs, Favorites, and Guilds. Replaces the previous tab-based home screen.
 
-### Search Functionality
-Global search for finding messages, users, and content across servers.
+### Quick Switcher
+Cmd-K (keyboard) or swipe-accessible switcher to jump between any channel or DM without navigating the sidebar.
 
-### Voice Messages
-Record and send voice messages with waveform visualization and playback controls.
+### GIF Support
+Attach GIFs directly from the system file picker in the message composer.
+
+### Presence Tracking
+Real-time online, idle, and offline status for users powered by WebSocket Gateway events.
+
+### Image Caching
+All avatars and media load via an in-memory cache to eliminate redundant network requests and reduce jank.
+
+### Chat Improvements
+Overhauled chat view with better message grouping, user caching to avoid repeated API lookups, and smoother scroll behavior.
+
+### Voice Channels
+Updated voice channel grid with improved speaking indicators and participant tracking.
 
 ### Starred Channels
-Mark channels as favorites for quick access from the home screen.
+Mark channels as favorites for quick access; state persists across sessions.
 
 ### Toast Notification System
 All actions provide visual feedback via toast notifications that appear at the bottom of the screen.
@@ -279,6 +306,11 @@ All actions provide visual feedback via toast notifications that appear at the b
 - [x] Voice messages
 - [x] Search functionality
 - [x] Toast notification system
+- [x] App Lock (Face ID / Touch ID + PIN)
+- [x] GIF attachment support
+- [x] Quick Switcher (Cmd-K)
+- [x] Image caching
+- [x] User presence tracking
 - [ ] Screen sharing
 - [ ] Widgets
 
