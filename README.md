@@ -128,7 +128,7 @@ flukavike/
 │       ├── QuickSwitcherView.swift # Cmd-K channel/DM quick switcher
 │       ├── GIFDocumentPicker.swift # System GIF file picker
 │       ├── ContextMenus.swift   # Channel/server/DM context menus
-│       └── HCaptchaView.swift   # hCaptcha verification
+│       └── (ALTCHA solved natively in Services/AltchaSolver.swift)
 ├── Intents/
 │   └── FlukavikeIntents.swift   # Siri intent definitions
 └── docs/

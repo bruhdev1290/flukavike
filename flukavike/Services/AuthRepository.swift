@@ -38,7 +38,6 @@ class AuthRepository: NSObject {
         instance: String,
         email: String,
         password: String,
-        captchaKey: String? = nil,
         inviteCode: String? = nil
     ) async throws -> LoginResult {
         do {
@@ -46,7 +45,6 @@ class AuthRepository: NSObject {
                 instance: instance,
                 email: email,
                 password: password,
-                captchaKey: captchaKey,
                 inviteCode: inviteCode
             )
             return try parseAuthResponse(data)
@@ -66,8 +64,7 @@ class AuthRepository: NSObject {
         dateOfBirth: String,
         username: String? = nil,
         displayName: String? = nil,
-        inviteCode: String? = nil,
-        captchaKey: String? = nil
+        inviteCode: String? = nil
     ) async throws -> LoginResult {
         do {
             let data = try await api.registerRaw(
@@ -77,8 +74,7 @@ class AuthRepository: NSObject {
                 dateOfBirth: dateOfBirth,
                 username: username,
                 displayName: displayName,
-                inviteCode: inviteCode,
-                captchaKey: captchaKey
+                inviteCode: inviteCode
             )
             return try parseAuthResponse(data)
         } catch let error as APIError {

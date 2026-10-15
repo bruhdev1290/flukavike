@@ -8,7 +8,6 @@ import Foundation
 @Observable
 class APIService {
     static let shared = APIService()
-    static let fallbackHCaptchaSiteKey = "9cbad400-df84-4e0c-bda6-e65000be78aa"
     
     /// Default Fluxer web instance
     static let defaultInstance = "web.fluxer.app"
@@ -21,10 +20,6 @@ class APIService {
     private(set) var gatewayURL: String = ""
     private(set) var cdnURL: String = ""
     private(set) var webBaseURL: String = ""
-    private(set) var captchaConfig: InstanceConfig.CaptchaConfig?
-    
-    var captchaRequired: Bool { captchaConfig != nil }
-    
     private var baseURL: String { apiBaseURL }
 
     /// CDN base URL, falling back to the canonical Fluxer CDN if discovery hasn't run.
@@ -58,7 +53,7 @@ class APIService {
         guard let hash, !hash.isEmpty else { return nil }
         if hash.hasPrefix("http") { return URL(string: hash) }
         let ext = hash.hasPrefix("a_") ? "gif" : "webp"
-        return URL(string: "\(resolvedCDNURL)/banners/\(serverId)/\(hash).\(ext)")
+        return URL(string: "\(resolvedCDNURL)/banners/\(serverId)/\(hash).\(ext)?size=640")
     }
 
     private var activeAuthToken: String? {
@@ -101,18 +96,12 @@ class APIService {
         self.webBaseURL = web.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
     
-    /// Clears the current captcha configuration
-    func clearCaptchaConfig() {
-        self.captchaConfig = nil
-    }
-    
     /// Resets to default Fluxer instance URLs
     func resetToDefaultInstance() {
         self.currentInstance = Self.defaultInstance
         self.apiBaseURL = "https://api.fluxer.app/v1"
         self.webBaseURL = "https://web.fluxer.app"
         self.gatewayURL = "wss://gateway.fluxer.app"
-        self.captchaConfig = nil
     }
     
     private var urlSession: URLSession {
@@ -261,7 +250,6 @@ class APIService {
         self.gatewayURL = ""
         self.cdnURL = ""
         self.webBaseURL = "https://\(normalized)"
-        self.captchaConfig = nil
     }
     
     private func fetchWellKnown(host: String) async throws -> InstanceConfig {
@@ -290,60 +278,6 @@ class APIService {
         self.gatewayURL = config.gateway
         self.cdnURL = config.cdn ?? ""
         self.webBaseURL = config.web?.trimmingCharacters(in: CharacterSet(charactersIn: "/")) ?? "https://\(currentInstance)"
-        if let configCaptcha = config.captcha {
-            self.captchaConfig = InstanceConfig.CaptchaConfig(
-                provider: configCaptcha.provider,
-                sitekey: sanitizedCaptchaSiteKey(configCaptcha.sitekey) ?? Self.fallbackHCaptchaSiteKey
-            )
-        } else {
-            self.captchaConfig = nil
-        }
-    }
-
-    private func captchaDetails(from json: [String: Any]?) -> (sitekey: String?, service: String?) {
-        guard let json else {
-            return (nil, nil)
-        }
-
-        let nestedCaptcha = json["captcha"] as? [String: Any]
-
-        let sitekey = [
-            json["captcha_sitekey"],
-            json["captcha_site_key"],
-            json["sitekey"],
-            json["site_key"],
-            nestedCaptcha?["sitekey"],
-            nestedCaptcha?["site_key"],
-            nestedCaptcha?["key"]
-        ]
-            .compactMap { $0 as? String }
-            .first { !$0.isEmpty }
-
-        let service = [
-            json["captcha_service"],
-            json["captcha_provider"],
-            json["service"],
-            json["provider"],
-            nestedCaptcha?["service"],
-            nestedCaptcha?["provider"]
-        ]
-            .compactMap { $0 as? String }
-            .first { !$0.isEmpty }
-
-        return (sitekey, service)
-    }
-
-    private func sanitizedCaptchaSiteKey(_ value: String?) -> String? {
-        guard let value else {
-            return nil
-        }
-
-        let filteredScalars = value.unicodeScalars.filter { scalar in
-            !CharacterSet.controlCharacters.contains(scalar) &&
-            !CharacterSet.whitespacesAndNewlines.contains(scalar)
-        }
-        let sanitized = String(String.UnicodeScalarView(filteredScalars))
-        return sanitized.isEmpty ? nil : sanitized
     }
 
     private func parseErrorCode(from json: [String: Any]?) -> String? {
@@ -445,11 +379,6 @@ class APIService {
             || code == "7"
     }
 
-    private func captchaTypeHeaderValue() -> String {
-        let provider = captchaConfig?.provider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return provider?.isEmpty == false ? provider! : "hcaptcha"
-    }
-
     private func applyDefaultHeaders(to request: inout URLRequest) {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("mobile", forHTTPHeaderField: "X-Fluxer-Platform")
@@ -482,7 +411,7 @@ class APIService {
     
     // MARK: - Authentication
     
-    func login(instance: String, login: String, password: String, captchaKey: String? = nil) async throws -> LoginResponse {
+    func login(instance: String, login: String, password: String) async throws -> LoginResponse {
         // Run discovery before login to find the correct API URL
         try await discoverInstance(instance)
         
@@ -491,19 +420,12 @@ class APIService {
             "password": password
         ]
 
-        var headers: [String: String] = [:]
-        if let captchaKey {
-            body["captcha_key"] = captchaKey
-            headers["X-Captcha-Token"] = captchaKey
-            headers["X-Captcha-Type"] = captchaTypeHeaderValue()
-        }
         let bodyData = try JSONEncoder.flukavike.encode(body)
         let data = try await makeRequest(
             endpoint: "/auth/login",
             method: "POST",
             body: bodyData,
-            includeAuthorization: false,
-            additionalHeaders: headers
+            includeAuthorization: false
         )
 
         do {
@@ -515,7 +437,7 @@ class APIService {
         }
     }
     
-    func register(instance: String, username: String, email: String, password: String, captchaKey: String? = nil) async throws -> LoginResponse {
+    func register(instance: String, username: String, email: String, password: String) async throws -> LoginResponse {
         // Run discovery before registration
         try await discoverInstance(instance)
         
@@ -525,19 +447,12 @@ class APIService {
             "password": password
         ]
 
-        var headers: [String: String] = [:]
-        if let captchaKey {
-            body["captcha_key"] = captchaKey
-            headers["X-Captcha-Token"] = captchaKey
-            headers["X-Captcha-Type"] = captchaTypeHeaderValue()
-        }
         let bodyData = try JSONEncoder.flukavike.encode(body)
         let data = try await makeRequest(
             endpoint: "/auth/register",
             method: "POST",
             body: bodyData,
-            includeAuthorization: false,
-            additionalHeaders: headers
+            includeAuthorization: false
         )
 
         do {
@@ -569,18 +484,12 @@ class APIService {
 
     // MARK: - Auth v2 / Flutter parity endpoints
 
-    func loginRaw(instance: String, email: String, password: String, captchaKey: String? = nil, inviteCode: String? = nil) async throws -> Data {
+    func loginRaw(instance: String, email: String, password: String, inviteCode: String? = nil) async throws -> Data {
         try await discoverInstance(instance)
         var body: [String: String] = [
             "email": email,
             "password": password
         ]
-        var headers: [String: String] = [:]
-        if let captchaKey {
-            body["captcha_key"] = captchaKey
-            headers["X-Captcha-Token"] = captchaKey
-            headers["X-Captcha-Type"] = captchaTypeHeaderValue()
-        }
         if let inviteCode {
             body["invite_code"] = inviteCode
         }
@@ -589,8 +498,7 @@ class APIService {
             endpoint: "/auth/login",
             method: "POST",
             body: bodyData,
-            includeAuthorization: false,
-            additionalHeaders: headers
+            includeAuthorization: false
         )
     }
 
@@ -601,8 +509,7 @@ class APIService {
         dateOfBirth: String,
         username: String? = nil,
         displayName: String? = nil,
-        inviteCode: String? = nil,
-        captchaKey: String? = nil
+        inviteCode: String? = nil
     ) async throws -> Data {
         try await discoverInstance(instance)
         var body: [String: Any] = [
@@ -614,19 +521,12 @@ class APIService {
         if let username, !username.isEmpty { body["username"] = username }
         if let displayName, !displayName.isEmpty { body["global_name"] = displayName }
         if let inviteCode, !inviteCode.isEmpty { body["invite_code"] = inviteCode }
-        var headers: [String: String] = [:]
-        if let captchaKey {
-            body["captcha_key"] = captchaKey
-            headers["X-Captcha-Token"] = captchaKey
-            headers["X-Captcha-Type"] = captchaTypeHeaderValue()
-        }
         let bodyData = try JSONSerialization.data(withJSONObject: body)
         return try await makeRequest(
             endpoint: "/auth/register",
             method: "POST",
             body: bodyData,
-            includeAuthorization: false,
-            additionalHeaders: headers
+            includeAuthorization: false
         )
     }
 
@@ -811,12 +711,51 @@ class APIService {
         )
     }
 
+    /// Maximum number of ALTCHA challenges solved for a single logical request.
+    private static let maxAltchaAttempts = 3
+
     func makeRequest(
         endpoint: String,
         method: String = "GET",
         body: Data? = nil,
         includeAuthorization: Bool = true,
         additionalHeaders: [String: String] = [:]
+    ) async throws -> Data {
+        var headers = additionalHeaders
+        var attempts = 0
+        while true {
+            do {
+                return try await performRequest(
+                    endpoint: endpoint,
+                    method: method,
+                    body: body,
+                    includeAuthorization: includeAuthorization,
+                    additionalHeaders: headers
+                )
+            } catch let challenge as AltchaChallengeRequired {
+                // Solve the proof-of-work natively and retry with a fresh token.
+                // A token is never reused: INVALID_CAPTCHA always brings a new challenge.
+                attempts += 1
+                guard attempts <= Self.maxAltchaAttempts else { throw APIError.captchaRequired }
+                do {
+                    headers["X-Captcha-Token"] = try await AltchaSolver.solveToken(challenge: challenge.challenge)
+                } catch {
+                    throw APIError.captchaRequired
+                }
+            }
+        }
+    }
+
+    private struct AltchaChallengeRequired: Error {
+        let challenge: [String: Any]
+    }
+
+    private func performRequest(
+        endpoint: String,
+        method: String,
+        body: Data?,
+        includeAuthorization: Bool,
+        additionalHeaders: [String: String]
     ) async throws -> Data {
         guard let url = URL(string: "\(baseURL)\(endpoint)") else {
             throw APIError.invalidURL
@@ -872,12 +811,11 @@ class APIService {
         }
 
         if isCaptchaErrorCode(code) || captchaLikeMessage {
-            let details = captchaDetails(from: json)
-            let sitekey = sanitizedCaptchaSiteKey(details.sitekey)
-                ?? sanitizedCaptchaSiteKey(captchaConfig?.sitekey)
-                ?? Self.fallbackHCaptchaSiteKey
-            let service = details.service ?? captchaConfig?.provider
-            throw APIError.captchaRequired(sitekey: sitekey, service: service)
+            if let challenge = json?["altcha_challenge"] as? [String: Any]
+                ?? parseErrorData(from: json)?["altcha_challenge"] as? [String: Any] {
+                throw AltchaChallengeRequired(challenge: challenge)
+            }
+            throw APIError.captchaRequired
         }
 
         switch httpResponse.statusCode {
@@ -1371,7 +1309,6 @@ struct InstanceConfig: Decodable {
     let web: String?
     let admin: String?
     let invite: String?
-    let captcha: CaptchaConfig?
     
     // Extended fields for federation/instance discovery
     let name: String?
@@ -1385,7 +1322,7 @@ struct InstanceConfig: Decodable {
     enum CodingKeys: String, CodingKey {
         case api, gateway, cdn
         case publicApi = "public_api"
-        case web, admin, invite, captcha
+        case web, admin, invite
         case endpoints
         case name, description, icon, banner
         case publicInstance = "public_instance"
@@ -1451,7 +1388,6 @@ struct InstanceConfig: Decodable {
         self.invite =
             (try container.decodeIfPresent(String.self, forKey: .invite))
             ?? endpoints?.invite
-        self.captcha = try container.decodeIfPresent(CaptchaConfig.self, forKey: .captcha)
 
         self.name = try container.decodeIfPresent(String.self, forKey: .name)
         self.description = try container.decodeIfPresent(String.self, forKey: .description)
@@ -1460,60 +1396,6 @@ struct InstanceConfig: Decodable {
         self.publicInstance = try container.decodeIfPresent(Bool.self, forKey: .publicInstance)
         self.userCount = try container.decodeIfPresent(Int.self, forKey: .userCount)
         self.version = try container.decodeIfPresent(String.self, forKey: .version)
-    }
-    
-    struct CaptchaConfig: Decodable {
-        let provider: String
-        let sitekey: String
-
-        private enum CodingKeys: String, CodingKey {
-            case provider
-            case service
-            case sitekey
-            case siteKey
-            case site_key
-            case key
-            case hcaptchaSiteKey = "hcaptcha_site_key"
-            case turnstileSiteKey = "turnstile_site_key"
-        }
-
-        init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-
-            let explicitProvider = (try container.decodeIfPresent(String.self, forKey: .provider)
-                ?? container.decodeIfPresent(String.self, forKey: .service)
-                ?? "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .lowercased()
-
-            let hcaptchaSiteKey = try container.decodeIfPresent(String.self, forKey: .hcaptchaSiteKey)
-            let turnstileSiteKey = try container.decodeIfPresent(String.self, forKey: .turnstileSiteKey)
-
-            sitekey = try container.decodeIfPresent(String.self, forKey: .sitekey)
-                ?? container.decodeIfPresent(String.self, forKey: .siteKey)
-                ?? container.decodeIfPresent(String.self, forKey: .site_key)
-                ?? container.decodeIfPresent(String.self, forKey: .key)
-                ?? hcaptchaSiteKey
-                ?? turnstileSiteKey
-                ?? ""
-
-            if explicitProvider.isEmpty || explicitProvider == "none" {
-                if let turnstileSiteKey, !turnstileSiteKey.isEmpty {
-                    provider = "turnstile"
-                } else if let hcaptchaSiteKey, !hcaptchaSiteKey.isEmpty {
-                    provider = "hcaptcha"
-                } else {
-                    provider = "hcaptcha"
-                }
-            } else {
-                provider = explicitProvider
-            }
-        }
-
-        init(provider: String, sitekey: String) {
-            self.provider = provider
-            self.sitekey = sitekey
-        }
     }
 }
 
@@ -1528,7 +1410,7 @@ enum APIError: Error {
     case notFound
     case rateLimited
     case mfaRequired(ticket: String, allowedMethods: [String])
-    case captchaRequired(sitekey: String?, service: String?)
+    case captchaRequired
     case serverError(statusCode: Int, message: String? = nil)
     case decodingError(Error)
     case discoveryFailed

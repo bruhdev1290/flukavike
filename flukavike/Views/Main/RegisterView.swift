@@ -93,16 +93,6 @@ struct RegisterView: View {
                     }
                 }
 
-                if vm.showCaptchaChallenge && !vm.captchaSiteKey.isEmpty {
-                    HCaptchaWidgetCard(
-                        siteKey: vm.captchaSiteKey,
-                        provider: vm.captchaProvider,
-                        token: vm.captchaToken,
-                        onToken: { vm.applyCaptchaToken($0) },
-                        onReset: { vm.resetCaptcha() }
-                    )
-                }
-
                 Button(action: submit) {
                     HStack {
                         if vm.isLoggingIn {
@@ -161,7 +151,6 @@ struct RegisterView: View {
             && !email.isEmpty
             && !password.isEmpty
             && !viewModel.isLoggingIn
-            && (!viewModel.showCaptchaChallenge || viewModel.captchaToken != nil)
     }
 
     private func submit() {

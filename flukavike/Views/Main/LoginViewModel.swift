@@ -21,11 +21,6 @@ final class LoginViewModel {
     var errorType: LoginError?
     var fieldErrors: [String: String] = [:]
 
-    // MARK: - Captcha
-    var showCaptchaChallenge: Bool = false
-    var captchaSiteKey: String = ""
-    var captchaProvider: String = "hcaptcha"
-    var captchaToken: String?
 
     // MARK: - Auth Sub-flows
     var mfaChallenge: MfaChallenge?
@@ -54,7 +49,7 @@ final class LoginViewModel {
     }
 
     var canSubmit: Bool {
-        canLogin && (!showCaptchaChallenge || captchaToken != nil)
+        canLogin
     }
 
     // MARK: - Actions
@@ -77,8 +72,7 @@ final class LoginViewModel {
                 let result = try await authRepository.login(
                     instance: instanceToUse,
                     email: trimmedEmail,
-                    password: password,
-                    captchaKey: captchaToken
+                    password: password
                 )
                 await handleLoginResult(result)
             } catch let failure as AuthFailure {
@@ -110,8 +104,7 @@ final class LoginViewModel {
                     password: password,
                     dateOfBirth: dateOfBirth,
                     username: username,
-                    displayName: displayName,
-                    captchaKey: captchaToken
+                    displayName: displayName
                 )
                 await handleLoginResult(result)
             } catch let failure as AuthFailure {
@@ -370,34 +363,6 @@ final class LoginViewModel {
         isPasswordVisible.toggle()
     }
 
-    // MARK: - Captcha
-
-    func applyCaptchaToken(_ token: String) {
-        captchaToken = token
-        errorMessage = nil
-    }
-
-    func resetCaptcha() {
-        captchaToken = nil
-    }
-
-    func startCaptchaChallenge(sitekey: String?, provider: String?) {
-        captchaToken = nil
-        captchaSiteKey = {
-            if let sitekey, !sitekey.isEmpty { return sitekey }
-            if let config = api.captchaConfig, !config.sitekey.isEmpty { return config.sitekey }
-            return APIService.fallbackHCaptchaSiteKey
-        }()
-        let resolvedProvider = (provider ?? api.captchaConfig?.provider ?? "hcaptcha")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        captchaProvider = resolvedProvider.contains("turnstile") ? "turnstile" : "hcaptcha"
-        showCaptchaChallenge = !captchaSiteKey.isEmpty
-        if !showCaptchaChallenge {
-            errorMessage = "Verification is temporarily unavailable. Please try again."
-        }
-    }
-
     // MARK: - Helpers
 
     private func handleLoginResult(_ result: LoginResult) async {
@@ -408,22 +373,16 @@ final class LoginViewModel {
             await MainActor.run {
                 mfaChallenge = challenge
                 isLoggingIn = false
-                captchaToken = nil
-                showCaptchaChallenge = false
             }
         case .ipAuthRequired(let challenge):
             await MainActor.run {
                 ipAuthChallenge = challenge
                 isLoggingIn = false
-                captchaToken = nil
-                showCaptchaChallenge = false
             }
         case .suspended(let info):
             await MainActor.run {
                 banViewInfo = info
                 isLoggingIn = false
-                captchaToken = nil
-                showCaptchaChallenge = false
             }
         }
     }
@@ -491,11 +450,8 @@ final class LoginViewModel {
 
     private func handleAPIError(_ error: APIError) async {
         switch error {
-        case .captchaRequired(let sitekey, let service):
-            await MainActor.run {
-                startCaptchaChallenge(sitekey: sitekey, provider: service)
-                isLoggingIn = false
-            }
+        case .captchaRequired:
+            await setError("Verification failed. Please try again.")
         case .unauthorized:
             await setError("Invalid email or password.", type: .invalidCredentials)
         case .serverError(_, let message):
@@ -527,8 +483,6 @@ final class LoginViewModel {
         isPasswordVisible = false
         isLoggingIn = false
         isStartingSso = false
-        showCaptchaChallenge = false
-        captchaToken = nil
         mfaChallenge = nil
         ipAuthChallenge = nil
         banViewInfo = nil

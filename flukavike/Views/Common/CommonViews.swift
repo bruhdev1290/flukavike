@@ -94,10 +94,19 @@ struct ServerIconView: View {
     }
 
     var body: some View {
-        CachedAsyncImage(url: resolvedURL) { image in
-            image.resizable().scaledToFill()
-        } placeholder: {
-            placeholder
+        Group {
+            if server.iconUrl?.hasPrefix("a_") == true {
+                // Animated icon: play it.
+                AnimatedRemoteImage(url: resolvedURL, maxPixelSize: size * 3) {
+                    placeholder
+                }
+            } else {
+                CachedAsyncImage(url: resolvedURL) { image in
+                    image.resizable().scaledToFill()
+                } placeholder: {
+                    placeholder
+                }
+            }
         }
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius))

@@ -44,16 +44,6 @@ struct LoginFormView: View {
                     passwordField(vm: vm)
                 }
 
-                if vm.showCaptchaChallenge && !vm.captchaSiteKey.isEmpty {
-                    HCaptchaWidgetCard(
-                        siteKey: vm.captchaSiteKey,
-                        provider: vm.captchaProvider,
-                        token: vm.captchaToken,
-                        onToken: { vm.applyCaptchaToken($0) },
-                        onReset: { vm.resetCaptcha() }
-                    )
-                }
-
                 Button(action: { vm.login() }) {
                     HStack {
                         if vm.isLoggingIn {

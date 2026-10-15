@@ -22,6 +22,9 @@ struct GuildNavigationView: View {
 
     private let apiService = APIService.shared
 
+    /// Keeps the last rail/channel rows scrollable above the floating tab bar.
+    private static let tabBarClearance: CGFloat = 96
+
     private var isAuthenticated: Bool {
         appState.isAuthenticated
     }
@@ -36,6 +39,8 @@ struct GuildNavigationView: View {
             channelListPane
         }
         .background(themeManager.backgroundPrimary(colorScheme))
+        .toolbarBackground(themeManager.backgroundPrimary(colorScheme), for: .navigationBar)
+        .toolbarBackgroundVisibility(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 if isLoadingServers || isLoadingChannels {
@@ -187,10 +192,11 @@ struct GuildNavigationView: View {
 
                 Spacer(minLength: 12)
             }
-            .padding(.vertical, 12)
+            .padding(.top, 12)
+            .padding(.bottom, Self.tabBarClearance)
         }
         .frame(width: 72)
-        .background(themeManager.backgroundSecondary(colorScheme))
+        .background(themeManager.backgroundSecondary(colorScheme).ignoresSafeArea(edges: .vertical))
     }
 
     private func railServerButton(server: Server) -> some View {
@@ -207,10 +213,9 @@ struct GuildNavigationView: View {
                 }
 
                 if selected {
-                    Capsule()
+                    UnevenRoundedRectangle(bottomTrailingRadius: 4, topTrailingRadius: 4)
                         .fill(themeManager.textPrimary(colorScheme))
-                        .frame(width: 4, height: 32)
-                        .offset(x: 4)
+                        .frame(width: 4, height: 36)
                 }
             }
         }
@@ -242,10 +247,9 @@ struct GuildNavigationView: View {
                 }
 
                 if isSelected {
-                    Capsule()
+                    UnevenRoundedRectangle(bottomTrailingRadius: 4, topTrailingRadius: 4)
                         .fill(themeManager.textPrimary(colorScheme))
-                        .frame(width: 4, height: 32)
-                        .offset(x: 4)
+                        .frame(width: 4, height: 36)
                 }
             }
         }
@@ -317,81 +321,75 @@ struct GuildNavigationView: View {
                             }
                         }
                     }
-                    .padding(.bottom, 16)
+                    .padding(.bottom, Self.tabBarClearance)
                 }
             }
         }
-        .background(themeManager.backgroundPrimary(colorScheme))
+        .background(themeManager.backgroundPrimary(colorScheme).ignoresSafeArea(edges: .vertical))
     }
 
     private var serverHeader: some View {
-        ZStack(alignment: .bottomLeading) {
-            // Banner
-            if let bannerUrl = selectedServer?.bannerUrl,
-               let url = APIService.shared.serverBannerURL(serverId: selectedServer?.id ?? "", hash: bannerUrl) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().scaledToFill()
-                    default:
-                        themeManager.backgroundSecondary(colorScheme)
-                    }
+        let hasBanner = selectedServer?.bannerUrl != nil
+        return ZStack(alignment: .bottomLeading) {
+            // Banner (animated when the server has an animated banner)
+            if hasBanner,
+               let hash = selectedServer?.bannerUrl,
+               let url = APIService.shared.serverBannerURL(serverId: selectedServer?.id ?? "", hash: hash) {
+                AnimatedRemoteImage(url: url, maxPixelSize: 960) {
+                    themeManager.backgroundSecondary(colorScheme)
                 }
-                .frame(height: 120)
+                .frame(height: 140)
                 .clipped()
             } else {
                 themeManager.backgroundSecondary(colorScheme)
                     .frame(height: 80)
             }
 
-            ZStack {
-                HStack {
-                    if let server = selectedServer {
-                        ServerIconView(server: server, size: 40, cornerRadius: 12)
-                    }
-                    Spacer()
+            if hasBanner {
+                // Scrim so the name stays readable on top of busy banner art.
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.65)],
+                    startPoint: .center,
+                    endPoint: .bottom
+                )
+                .allowsHitTesting(false)
+            }
+
+            HStack(spacing: 10) {
+                if let server = selectedServer {
+                    ServerIconView(server: server, size: 40, cornerRadius: 12)
                 }
 
                 Text(selectedServer?.name ?? "Select a server")
                     .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(themeManager.textPrimary(colorScheme))
-                    .shadow(radius: selectedServer?.bannerUrl != nil ? 2 : 0)
+                    .foregroundStyle(hasBanner ? Color.white : themeManager.textPrimary(colorScheme))
+                    .shadow(color: .black.opacity(hasBanner ? 0.6 : 0), radius: 2)
                     .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .center)
 
-                HStack {
-                    Spacer()
-                    // Chevron opens the server menu (manage / leave).
-                    Button {
-                        if let server = selectedServer {
-                            menuServer = server
-                            HapticFeedback.medium()
-                        }
-                    } label: {
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(themeManager.textTertiary(colorScheme))
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
+                Spacer(minLength: 0)
+
+                // Chevron opens the server menu (manage / leave).
+                Button {
+                    if let server = selectedServer {
+                        menuServer = server
+                        HapticFeedback.medium()
                     }
-                    .accessibilityLabel("Server menu")
-                    .disabled(selectedServer == nil)
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(hasBanner ? Color.white : themeManager.textTertiary(colorScheme))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
+                .accessibilityLabel("Server menu")
+                .disabled(selectedServer == nil)
             }
-            .padding(12)
-            .background(
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color.black.opacity(selectedServer?.bannerUrl != nil ? 0.0 : 0.0),
-                        Color.black.opacity(selectedServer?.bannerUrl != nil ? 0.4 : 0.0)
-                    ]),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
+            .padding(.horizontal, 12)
+            .padding(.bottom, 8)
         }
-        .frame(height: selectedServer?.bannerUrl != nil ? 120 : 80)
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: selectedServer?.bannerUrl != nil)
+        .frame(height: hasBanner ? 140 : 80)
+        .clipped()
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: hasBanner)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: selectedServer?.id)
     }
 
